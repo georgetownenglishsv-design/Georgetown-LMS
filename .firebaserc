@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "gteamgr-506ff"
+  },
+  "targets": {
+    "gteamgr-506ff": {
+      "hosting": {
+        "lms": [
+          "georgetown-lms"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

@@ -1,0 +1,72 @@
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const { ConfidentialClientApplication } = require("@azure/msal-node");
+const axios = require("axios");
+
+admin.initializeApp();
+const db = admin.firestore();
+
+// 1. Azure 설정 (이 값들을 환경 변수로 설정해야 함)
+// firebase functions:config:set ms.client_id="YOUR_ID" ms.client_secret="YOUR_SECRET" ms.tenant_id="YOUR_TENANT"
+const MS_CONFIG = {
+  auth: {
+    clientId: functions.config().ms.client_id,
+    authority: `https://login.microsoftonline.com/${functions.config().ms.tenant_id}`,
+    clientSecret: functions.config().ms.client_secret,
+  },
+};
+
+const pca = new ConfidentialClientApplication(MS_CONFIG);
+const SCOPES = ["OnlineMeetings.ReadWrite", "User.Read", "Offline_access"];
+
+// 2. [함수 A] 로그인 URL 생성 (프론트엔드에서 호출)
+exports.getMSAuthUrl = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  
+  const authCodeUrlParameters = {
+    scopes: SCOPES,
+    redirectUri: data.redirectUrl, // 예: https://your-app.com/portal/settings
+  };
+
+  const response = await pca.getAuthCodeUrl(authCodeUrlParameters);
+  return { url: response };
+});
+
+// 3. [함수 B] Teams 미팅 생성 (프론트엔드에서 호출)
+exports.createTeamsMeeting = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+
+  const { subject, refCode } = data;
+
+  // DB에서 저장된 토큰 가져오기 (실제 구현 시 토큰 저장 로직 필요)
+  // 여기서는 간소화를 위해 토큰이 이미 있다고 가정하거나, Refresh Token 로직을 넣어야 함.
+  // ... (Token Refresh Logic Skipped for Brevity - Needs Implementation) ...
+
+  try {
+      // MS Graph API 호출
+      // const accessToken = await getAccessTokenFromDB(); 
+      // const response = await axios.post(
+      //   "https://graph.microsoft.com/v1.0/me/onlineMeetings",
+      //   {
+      //     startDateTime: new Date().toISOString(), // 지금 시작 (영구 링크용)
+      //     subject: subject,
+      //     recordAutomatically: true, // 자동 녹화!
+      //     accessLevel: "everyone", // 게스트 입장 허용
+      //     allowAttendeeToBeforeHost: true // 호스트 없어도 입장 가능
+      //   },
+      //   { headers: { Authorization: `Bearer ${accessToken}` } }
+      // );
+      
+      // return { joinWebUrl: response.data.joinWebUrl, id: response.data.id };
+      
+      // [임시] 백엔드 로직이 완성되기 전까지는 성공 응답 시뮬레이션
+      return { 
+          joinWebUrl: "https://teams.microsoft.com/l/meetup-join/simulation...", 
+          id: "simulated-id" 
+      };
+
+  } catch (error) {
+      console.error(error);
+      throw new functions.https.HttpsError('internal', 'Teams API Error');
+  }
+});
