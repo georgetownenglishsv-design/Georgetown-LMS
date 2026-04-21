@@ -1,10 +1,46 @@
 
 import { db, firebase, functions } from '../firebase';
-import { Student, Category, Course, AppUser, SystemSettings, Exam, ExamRegistration, Teacher, ClassSession, AttendanceRecord, CourseDetail, WebExamLanding, WebExamDetail, Testimonial, GlobalFAQ, WebStoreConfig, WebLandingConfig, BrandInfo, SystemLog, MessageTemplate, Question, PlacementResult, DailyQuiz, StudentPackage, PackageSlot } from '../types';
+import { Student, Category, Course, AppUser, SystemSettings, Exam, ExamRegistration, Teacher, ClassSession, AttendanceRecord, CourseDetail, WebExamLanding, WebExamDetail, Testimonial, GlobalFAQ, WebStoreConfig, WebLandingConfig, BrandInfo, SystemLog, MessageTemplate, Question, PlacementResult, DailyQuiz, StudentPackage, PackageSlot, SpeakingProgress } from '../types';
 import { generateRefCode } from './microsoft';
 
 // Re-export firebase instances
 export { db, firebase, functions };
+
+// --- SPEAKING CHALLENGE SERVICES ---
+export const getTodaySpeakingProgress = async (studentId: string): Promise<SpeakingProgress | null> => {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const docId = `${studentId}_${today}`;
+        const doc = await db.collection('speaking_progress').doc(docId).get();
+        
+        if (doc.exists) {
+            return { id: doc.id, ...doc.data() } as SpeakingProgress;
+        }
+        return null;
+    } catch (e) {
+        console.error("Error getting speaking progress", e);
+        return null;
+    }
+};
+
+export const updateSpeakingProgress = async (studentId: string, secondsUsed: number, isCompleted: boolean = false) => {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        const docId = `${studentId}_${today}`;
+            
+        const data = {
+            studentId,
+            date: today,
+            secondsUsed,
+            isCompleted,
+            lastUpdated: new Date().toISOString()
+        };
+
+        await db.collection('speaking_progress').doc(docId).set(data, { merge: true });
+    } catch (e) {
+        console.error("Error updating speaking progress", e);
+    }
+};
 
 // --- DAILY QUIZ SERVICES ---
 export const batchSaveDailyQuizzes = async (quizzes: DailyQuiz[]) => {
@@ -118,25 +154,63 @@ export const deleteStudent = async (id: string) => {
     await db.collection('students').doc(id).delete(); 
 };
 
+export const getStudentById = async (id: string): Promise<Student | null> => {
+    try {
+        const doc = await db.collection('students').doc(id).get();
+        if (doc.exists) return { id: doc.id, ...doc.data() } as Student;
+        return null;
+    } catch (e) {
+        return null;
+    }
+};
+
+export const getStudentsByEmail = async (email: string): Promise<Student[]> => {
+    try {
+        const snapshot = await db.collection('students')
+            .where('email', '==', email)
+            .get();
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
+    } catch (e) {
+        return [];
+    }
+};
+
 export const authenticateStudent = async (email: string, lastNameInput: string): Promise<{ student: Student, token: string } | null> => {
     try {
-        const snapshot = await db.collection('students').where('email', '==', email).where('status', 'in', ['Activo', 'Pagado', 'Graduado']).limit(1).get();
+        // Original query: filter by email and status in the database
+        const snapshot = await db.collection('students')
+            .where('email', '==', email)
+            .where('status', 'in', ['Activo', 'Pagado', 'Graduado'])
+            .get();
+            
         if (snapshot.empty) return null;
-        const doc = snapshot.docs[0];
-        const student = { id: doc.id, ...doc.data() } as Student;
-        const input = lastNameInput.trim().toLowerCase();
         
-        // Robust check: match lastName if exists, otherwise fallback to check if name contains input
-        if (student.lastName) { 
-            if (student.lastName.toLowerCase().trim() !== input) return null; 
-        } else { 
-            if (!student.name.toLowerCase().includes(input)) return null; 
+        const input = lastNameInput.trim().toLowerCase();
+        let student: Student | null = null;
+        
+        // Find the student that matches the last name
+        for (const doc of snapshot.docs) {
+            const data = doc.data() as Student;
+            if (data.lastName) {
+                if (data.lastName.toLowerCase().trim() === input) {
+                    student = { ...data, id: doc.id };
+                    break;
+                }
+            } else if (data.name.toLowerCase().includes(input)) {
+                student = { ...data, id: doc.id };
+                break;
+            }
         }
+        
+        if (!student) return null;
         
         const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
         await db.collection('students').doc(student.id).update({ sessionToken: token });
         return { student, token };
-    } catch (e) { return null; }
+    } catch (e) { 
+        console.error("Auth Error:", e);
+        return null; 
+    }
 };
 
 export const verifyStudentSession = async (studentId: string, token: string): Promise<boolean> => { 
@@ -854,8 +928,21 @@ export const savePlacementResult = async (result: Omit<PlacementResult, 'id'>) =
 export const getPlacementResults = async (): Promise<PlacementResult[]> => { 
     try { 
         const snapshot = await db.collection('placement_results').orderBy('date', 'desc').get(); 
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlacementResult)); 
+        return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as PlacementResult)); 
     } catch (e) { return []; } 
+};
+export const getStudentPlacementResult = async (email: string): Promise<PlacementResult | null> => {
+    try {
+        const snapshot = await db.collection('placement_results')
+            .where('studentEmail', '==', email)
+            .orderBy('date', 'desc')
+            .limit(1)
+            .get();
+        if (snapshot.empty) return null;
+        return { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as PlacementResult;
+    } catch (e) {
+        return null;
+    }
 };
 export const updatePlacementResult = async (id: string, data: Partial<PlacementResult>) => { 
     await db.collection('placement_results').doc(id).update(data); 
@@ -938,9 +1025,20 @@ export const verifyDataIntegrity = runBackgroundCleanup;
 export const getPackages = async (): Promise<StudentPackage[]> => {
     try {
         const snapshot = await db.collection('student_packages').orderBy('startDate', 'desc').get();
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as StudentPackage));
+        return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as StudentPackage));
     } catch (e) {
         console.error("Error fetching packages", e);
+        return [];
+    }
+};
+
+export const getStudentPackages = async (email: string): Promise<StudentPackage[]> => {
+    try {
+        const snapshot = await db.collection('student_packages')
+            .where('humanId', '==', email)
+            .get();
+        return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as StudentPackage));
+    } catch (e) {
         return [];
     }
 };

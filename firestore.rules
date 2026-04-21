@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Default: Deny everything for safety
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Mock Test System Rules (Incognito/Public Access) ---
+
+    // 1. Mock Tests (Questions)
+    // Students must be able to READ the test content to take the exam.
+    // Admins (authenticated) can manage them.
+    match /mock_tests/{testId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // 2. Mock Test Tickets
+    // Students must be able to READ (validate code) and UPDATE (save progress).
+    // Security relies on the Ticket ID being a secret key.
+    match /mock_test_tickets/{ticketId} {
+      allow read, update: if true;
+      allow create, delete: if isAuthenticated();
+    }
+
+    // 3. Mock Test Results
+    // Students CREATE a result upon completion.
+    // They cannot read others' results. Admins can view all.
+    match /mock_test_results/{resultId} {
+      allow create: if true;
+      allow get: if true; // Allow students to view their own result by ID
+      allow list: if isAuthenticated(); // Only admins can list all results
+      allow update, delete: if isAuthenticated();
+    }
+
+    // --- Other Public Collections (As per your request) ---
+    
+    // Level Test Results
+    match /level_test_results/{id} {
+      allow create: if true;
+      allow read, write: if isAuthenticated();
+    }
+
+    // Course Enrollments / Applications
+    match /enrollments/{id} {
+      allow create: if true;
+      allow read, write: if isAuthenticated();
+    }
+
+    // Contact Messages
+    match /messages/{id} {
+      allow create: if true;
+      allow read, write: if isAuthenticated();
+    }
+
+    // Speaking Progress
+    match /speaking_progress/{id} {
+      allow create: if true;
+      allow read, write: if isAuthenticated();
+    }
+
+    // --- Admin/User Data ---
+    
+    // Users collection (Strict privacy)
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}

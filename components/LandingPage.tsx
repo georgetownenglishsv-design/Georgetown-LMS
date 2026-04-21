@@ -178,6 +178,47 @@ const LandingPage: React.FC = () => {
         </div>
       </div>
 
+      {/* --- FLASH PROMO BANNER FOR EMMA --- */}
+      <div className="w-full max-w-6xl mx-auto px-4 pt-8 pb-2">
+        <div 
+          onClick={() => navigate('/try-emma')}
+          className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-purple-900/40 to-slate-900 border border-purple-500/40 shadow-[0_0_30px_rgba(168,85,247,0.25)] hover:shadow-[0_0_50px_rgba(168,85,247,0.5)] transition-all duration-500 hover:-translate-y-1 cursor-pointer group"
+        >
+          {/* Shimmer Effect */}
+          <div className="absolute top-0 -left-[100%] h-full w-[50%] z-0 block transform -skew-x-12 bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:left-[200%] transition-all duration-1000 ease-in-out" />
+          
+          {/* Animated Glow */}
+          <div className="absolute inset-0 z-0 pointer-events-none">
+            <div className="absolute top-[-50%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-600/20 blur-[80px] mix-blend-screen animate-pulse"></div>
+            <div className="absolute bottom-[-50%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-600/20 blur-[80px] mix-blend-screen animate-pulse" style={{ animationDelay: '1s' }}></div>
+          </div>
+
+          <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex-1 text-center md:text-left">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-500/20 border border-pink-500/50 text-pink-300 text-xs font-black tracking-widest uppercase mb-3 shadow-[0_0_15px_rgba(236,72,153,0.5)] animate-pulse">
+                <Icon name="local_fire_department" className="text-sm" />
+                Oferta Especial: 1 Minuto Gratis
+              </div>
+              <h2 className="text-2xl md:text-3xl font-black text-white tracking-tight mb-2 leading-tight">
+                ¿Inglés sin miedo? <br className="hidden md:block"/>
+                <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">Conoce a Emma, tu Tutor.</span>
+              </h2>
+              <p className="text-slate-300 text-sm md:text-base max-w-xl">
+                Practica speaking sin juicios y recibe feedback instantáneo. ¡Haz clic aquí para probarlo ahora mismo!
+              </p>
+            </div>
+            <div className="shrink-0">
+              <div className="relative inline-flex items-center justify-center px-8 py-4 font-black text-white transition-all duration-300 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full group-hover:scale-110 overflow-hidden shadow-[0_0_20px_rgba(168,85,247,0.6)]">
+                <span className="relative flex items-center gap-2">
+                  <Icon name="play_arrow" className="text-2xl" />
+                  PROBAR AHORA
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* --- MOTIVATION GRID (COMPACT TEASERS) --- */}
       <div className="w-full max-w-6xl mx-auto px-4 py-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

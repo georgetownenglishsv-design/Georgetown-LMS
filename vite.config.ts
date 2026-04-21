@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
     define: {
       // Expose the API_KEY safely to the client-side code
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY),
     },
     build: {
       outDir: 'dist',

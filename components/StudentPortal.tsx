@@ -4,9 +4,21 @@ import * as ReactRouterDOM from 'react-router-dom';
 const { useNavigate } = ReactRouterDOM as any;
 import { Icon } from './Icon';
 import { Logo } from './Logo';
-import { getStudentSchedule, verifyStudentSession, logStudentEntry, getStudents, getBrandInfo } from '../services/db';
-import { Student, ClassSession, BrandInfo } from '../types';
+import { 
+    getStudentSchedule, 
+    verifyStudentSession, 
+    logStudentEntry, 
+    getBrandInfo,
+    getDailyQuizByDay,
+    getStudentPlacementResult,
+    getStudentPackages,
+    getStudentById,
+    getStudentsByEmail
+} from '../services/db';
+import { Student, ClassSession, BrandInfo, DailyQuiz, PlacementResult, StudentPackage } from '../types';
 import VideoCinema from './VideoCinema';
+import AISpeakingChallenge from './AISpeakingChallenge';
+import { DailyQuizModal } from './DailyQuizModal';
 
 const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -30,10 +42,17 @@ const StudentPortal: React.FC = () => {
     const [brand, setBrand] = useState<BrandInfo | null>(null);
     const [groupedUpcoming, setGroupedUpcoming] = useState<{[key: string]: ClassSession[]}>({});
     const [groupedPast, setGroupedPast] = useState<{[key: string]: ClassSession[]}>({});
-    const [activeTab, setActiveTab] = useState<'upcoming' | 'history'>('upcoming');
+    const [activeTab, setActiveTab] = useState<'upcoming' | 'history' | 'quiz'>('upcoming');
     const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
     const [todayClass, setTodayClass] = useState<ClassSession | null>(null);
     const [joining, setJoining] = useState(false);
+
+    // [NEW] Additional Data
+    const [dailyQuiz, setDailyQuiz] = useState<DailyQuiz | null>(null);
+    const [placementResult, setPlacementResult] = useState<PlacementResult | null>(null);
+    const [packages, setPackages] = useState<StudentPackage[]>([]);
+    const [showQuizModal, setShowQuizModal] = useState(false);
+    const [showAIModal, setShowAIModal] = useState(false);
 
     // [UPDATED] 시네마 플레이어 상태
     const [cinemaData, setCinemaData] = useState<{ url: string, title: string } | null>(null);
@@ -88,129 +107,143 @@ const StudentPortal: React.FC = () => {
 
     useEffect(() => {
         const init = async () => {
-            const studentId = localStorage.getItem('studentId');
-            const token = localStorage.getItem('studentToken');
-            if (!studentId || !token) { navigate('/student/login'); return; }
-            
-            const isValid = await verifyStudentSession(studentId, token);
-            if (!isValid) { 
-                alert("Sesión expirada o inválida."); 
-                localStorage.clear(); 
-                navigate('/student/login'); 
-                return; 
-            }
-            
-            const [allStudents, brandInfo] = await Promise.all([getStudents(), getBrandInfo()]);
-            setBrand(brandInfo);
-            const me = allStudents.find(s => s.id === studentId);
-            if (!me) { navigate('/student/login'); return; }
-            setStudent(me);
-
-            // [CRITICAL CHANGE]: Aggregate courses based on Email to link multiple enrollments
-            const myCourseIds: string[] = [];
-            
-            if (me.email) {
-                // Find ALL student records with the same email (Case Insensitive)
-                const myProfiles = allStudents.filter(s => 
-                    s.email && s.email.toLowerCase().trim() === me.email?.toLowerCase().trim()
-                );
+            try {
+                const studentId = localStorage.getItem('studentId');
+                const token = localStorage.getItem('studentToken');
+                if (!studentId || !token) { navigate('/student/login'); return; }
                 
-                // Collect Course IDs from all found profiles
-                myProfiles.forEach(p => {
-                    if (p.courseId && !myCourseIds.includes(p.courseId)) {
-                        myCourseIds.push(p.courseId);
-                    }
-                });
-            } else {
-                // Fallback for legacy records without email -> use single ID
-                if (me.courseId) myCourseIds.push(me.courseId);
-            }
-            
-            if (myCourseIds.length > 0) {
-                // Pass IDs ARRAY to the service (It handles multiple IDs correctly)
-                const allSessions = await getStudentSchedule(myCourseIds);
-                const todayStr = getTodayString();
-                const todayDate = getMidnightDate(todayStr);
-                const now = new Date();
-                const currentMinutes = now.getHours() * 60 + now.getMinutes();
-                
-                // [NEW LOGIC]: Filter out sessions that occurred before the student's registration date
-                const studentRegDate = me.date ? getMidnightDate(me.date).getTime() : 0;
-                const filteredSessions = allSessions.filter(s => {
-                    const sDate = getMidnightDate(s.date).getTime();
-                    return sDate >= studentRegDate;
-                });
-
-                // [FIXED LOGIC]: Find ALL classes for today, then pick the most relevant one
-                const todaysSessions = filteredSessions.filter(s => {
-                    const sDate = getMidnightDate(s.date);
-                    return sDate.getTime() === todayDate.getTime() && s.status !== 'Cancelada';
-                });
-
-                let bestTodayClass: ClassSession | null = null;
-
-                if (todaysSessions.length > 0) {
-                    // 1. Try to find currently active class
-                    bestTodayClass = todaysSessions.find(s => {
-                        const startMins = getMinutes(s.startTime);
-                        const endMins = getMinutes(s.endTime);
-                        // Active window: 10 mins before start until end
-                        return currentMinutes >= (startMins - 10) && currentMinutes < endMins;
-                    }) || null;
-
-                    // 2. If no active class, find next upcoming class today
-                    if (!bestTodayClass) {
-                        bestTodayClass = todaysSessions.find(s => {
-                            const startMins = getMinutes(s.startTime);
-                            return currentMinutes < startMins;
-                        }) || null;
-                    }
-
-                    // 3. If no upcoming class (all finished), show the last one that finished
-                    if (!bestTodayClass) {
-                        bestTodayClass = todaysSessions[todaysSessions.length - 1];
-                    }
+                const isValid = await verifyStudentSession(studentId, token);
+                if (!isValid) { 
+                    alert("Sesión expirada o inválida."); 
+                    localStorage.clear(); 
+                    navigate('/student/login'); 
+                    return; 
                 }
                 
-                setTodayClass(bestTodayClass);
-
-                const future: ClassSession[] = [];
-                const past: ClassSession[] = [];
-
-                filteredSessions.forEach(s => {
-                    const sessionDate = getMidnightDate(s.date);
-                    // Filter out the one we selected as "Today's Class" from the lists to avoid duplication?
-                    // Optional: Currently showing duplicates in list is standard behavior in LMS to keep history complete.
-                    // We will keep standard logic: Date based splitting.
-                    
-                    if (sessionDate.getTime() < todayDate.getTime()) {
-                        past.push(s);
-                    } else if (sessionDate.getTime() > todayDate.getTime()) {
-                        future.push(s);
-                    } else {
-                        // For TODAY'S classes in the list:
-                        const endMinutes = getMinutes(s.endTime);
-                        if (currentMinutes > endMinutes) past.push(s); else future.push(s);
-                    }
-                });
+                // Optimized fetching: Get only the current student and brand info
+                const [me, brandInfo] = await Promise.all([
+                    getStudentById(studentId),
+                    getBrandInfo()
+                ]);
                 
-                const groupSessions = (sessions: ClassSession[]) => {
-                    const groups: {[key: string]: ClassSession[]} = {};
-                    sessions.forEach(s => {
-                        const [y, m] = s.date.split('-'); 
-                        const key = `${MONTHS[parseInt(m) - 1]} ${y}`;
-                        if (!groups[key]) groups[key] = [];
-                        groups[key].push(s);
-                    });
-                    return groups;
-                };
+                setBrand(brandInfo);
+                if (!me) { navigate('/student/login'); return; }
+                setStudent(me);
 
-                setGroupedUpcoming(groupSessions(future));
-                setGroupedPast(groupSessions(past.reverse())); 
-                const currentMonthKey = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
-                setExpandedMonths(new Set([currentMonthKey]));
+                // Fetch additional data in parallel
+                const quizId = Math.floor(new Date().getTime() / (1000 * 3600 * 24)) % 365;
+                const [quiz, placement, myPackages] = await Promise.all([
+                    getDailyQuizByDay(quizId).catch(() => null),
+                    getStudentPlacementResult(me.email || '').catch(() => null),
+                    getStudentPackages(me.email || '').catch(() => [])
+                ]);
+                
+                setDailyQuiz(quiz);
+                setPlacementResult(placement);
+                setPackages(myPackages);
+
+                // [CRITICAL CHANGE]: Aggregate courses based on Email to link multiple enrollments
+                const myCourseIds: string[] = [];
+                
+                if (me.email) {
+                    // Optimized: Fetch only profiles with the same email
+                    const myProfiles = await getStudentsByEmail(me.email);
+                    
+                    // Collect Course IDs from all found profiles
+                    myProfiles.forEach(p => {
+                        if (p.courseId && !myCourseIds.includes(p.courseId)) {
+                            myCourseIds.push(p.courseId);
+                        }
+                    });
+                } else {
+                    // Fallback for legacy records without email -> use single ID
+                    if (me.courseId) myCourseIds.push(me.courseId);
+                }
+                
+                if (myCourseIds.length > 0) {
+                    // Pass IDs ARRAY to the service (It handles multiple IDs correctly)
+                    const allSessions = await getStudentSchedule(myCourseIds);
+                    const todayStr = getTodayString();
+                    const todayDate = getMidnightDate(todayStr);
+                    const now = new Date();
+                    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+                    
+                    // [NEW LOGIC]: Filter out sessions that occurred before the student's registration date
+                    const studentRegDate = me.date ? getMidnightDate(me.date).getTime() : 0;
+                    const filteredSessions = allSessions.filter(s => {
+                        const sDate = getMidnightDate(s.date).getTime();
+                        return sDate >= studentRegDate;
+                    });
+
+                    // [FIXED LOGIC]: Find ALL classes for today, then pick the most relevant one
+                    const todaysSessions = filteredSessions.filter(s => {
+                        const sDate = getMidnightDate(s.date);
+                        return sDate.getTime() === todayDate.getTime() && s.status !== 'Cancelada';
+                    });
+
+                    let bestTodayClass: ClassSession | null = null;
+
+                    if (todaysSessions.length > 0) {
+                        // 1. Try to find currently active class
+                        bestTodayClass = todaysSessions.find(s => {
+                            const startMins = getMinutes(s.startTime);
+                            const endMins = getMinutes(s.endTime);
+                            // Active window: 10 mins before start until end
+                            return currentMinutes >= (startMins - 10) && currentMinutes < endMins;
+                        }) || null;
+
+                        // 2. If no active class, find next upcoming class today
+                        if (!bestTodayClass) {
+                            bestTodayClass = todaysSessions.find(s => {
+                                const startMins = getMinutes(s.startTime);
+                                return currentMinutes < startMins;
+                            }) || null;
+                        }
+
+                        // 3. If no upcoming class (all finished), show the last one that finished
+                        if (!bestTodayClass) {
+                            bestTodayClass = todaysSessions[todaysSessions.length - 1];
+                        }
+                    }
+                    
+                    setTodayClass(bestTodayClass);
+
+                    const future: ClassSession[] = [];
+                    const past: ClassSession[] = [];
+
+                    filteredSessions.forEach(s => {
+                        const sessionDate = getMidnightDate(s.date);
+                        if (sessionDate.getTime() < todayDate.getTime()) {
+                            past.push(s);
+                        } else if (sessionDate.getTime() > todayDate.getTime()) {
+                            future.push(s);
+                        } else {
+                            const endMinutes = getMinutes(s.endTime);
+                            if (currentMinutes > endMinutes) past.push(s); else future.push(s);
+                        }
+                    });
+                    
+                    const groupSessions = (sessions: ClassSession[]) => {
+                        const groups: {[key: string]: ClassSession[]} = {};
+                        sessions.forEach(s => {
+                            const [y, m] = s.date.split('-'); 
+                            const key = `${MONTHS[parseInt(m) - 1]} ${y}`;
+                            if (!groups[key]) groups[key] = [];
+                            groups[key].push(s);
+                        });
+                        return groups;
+                    };
+
+                    setGroupedUpcoming(groupSessions(future));
+                    setGroupedPast(groupSessions(past.reverse())); 
+                    const currentMonthKey = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+                    setExpandedMonths(new Set([currentMonthKey]));
+                }
+            } catch (error) {
+                console.error("Error initializing portal:", error);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         };
         init();
     }, []);
@@ -334,9 +367,62 @@ const StudentPortal: React.FC = () => {
                 <div className="bg-slate-900 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
                     <div className="relative z-10 flex items-center gap-4">
                         <div className="size-14 rounded-full bg-white text-slate-900 flex items-center justify-center font-bold text-xl">{student?.name.substring(0, 2).toUpperCase()}</div>
-                        <div><p className="text-slate-400 text-xs font-bold uppercase">Bienvenido</p><h2 className="text-2xl font-black">{student?.name.split(' ')[0]}</h2></div>
+                        <div className="flex-1">
+                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Bienvenido</p>
+                            <h2 className="text-2xl font-black">{student?.name.split(' ')[0]}</h2>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                                {student?.attendance && (
+                                    <span className="text-[9px] font-black bg-white/10 px-1.5 py-0.5 rounded uppercase">Asistencia: {student.attendance}%</span>
+                                )}
+                                {placementResult && (
+                                    <span className="text-[9px] font-black bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded uppercase border border-blue-500/30">Nivel: {placementResult.calculatedLevel}</span>
+                                )}
+                            </div>
+                        </div>
                     </div>
+                    {packages.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-white/10">
+                            <p className="text-[10px] font-black text-slate-500 uppercase mb-2">Mis Paquetes</p>
+                            <div className="space-y-2">
+                                {packages.map((pkg, idx) => {
+                                    const used = pkg.slots.filter(s => s.status === 'Used').length;
+                                    const total = pkg.totalMonths;
+                                    const remaining = total - used;
+                                    return (
+                                        <div key={idx} className="flex justify-between items-center text-xs">
+                                            <span className="font-bold text-slate-300">{pkg.totalMonths} Meses</span>
+                                            <span className="font-black text-white">{remaining} / {total}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
+
+                {/* AI Tutor Premium Banner */}
+                <button 
+                    onClick={() => setShowAIModal(true)}
+                    className="w-full group relative bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-1 shadow-2xl overflow-hidden active:scale-[0.98] transition-all"
+                >
+                    <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20 group-hover:opacity-40 transition-opacity duration-500 blur-xl"></div>
+                    <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-[22px] p-6 border border-white/10 overflow-hidden flex flex-col items-start text-left">
+                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 group-hover:opacity-20 transition-all duration-500 group-hover:rotate-12">
+                            <Icon name="psychology" className="text-8xl text-white" />
+                        </div>
+                        <div className="flex items-center gap-2 mb-3 relative z-10">
+                            <span className="bg-gradient-to-r from-pink-500 to-purple-500 text-white text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider shadow-lg">Premium</span>
+                            <span className="text-purple-200 text-xs font-black uppercase tracking-widest">Speaking Challenge</span>
+                        </div>
+                        <h3 className="text-2xl font-black text-white leading-tight mb-2 relative z-10">Practica tu Speaking<br/>con Emma</h3>
+                        <p className="text-indigo-200 text-sm font-medium opacity-90 max-w-[85%] relative z-10">Mejora tu fluidez y pronunciación en 3 minutos con nuestra tutora nativa.</p>
+                        
+                        <div className="mt-6 flex items-center gap-2 text-white font-bold text-sm bg-white/10 px-4 py-2 rounded-xl backdrop-blur-md border border-white/5 group-hover:bg-white/20 transition-colors relative z-10">
+                            <Icon name="play_arrow" /> Comenzar
+                        </div>
+                    </div>
+                </button>
+
                 {todayClass && (
                     <div className={`bg-white rounded-3xl p-6 shadow-xl border-2 transition-all ${isClassActive() ? 'border-blue-500' : 'border-slate-200'}`}>
                         <div className="mb-4">
@@ -349,11 +435,53 @@ const StudentPortal: React.FC = () => {
                         <button onClick={handleJoinClass} disabled={!isClassActive()} className={`w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${isClassActive() ? 'bg-blue-600 text-white shadow-lg active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><Icon name="video_camera_front" /> Entrar a Clase</button>
                     </div>
                 )}
-                <div className="bg-white p-1.5 rounded-2xl shadow-sm flex">
-                    <button onClick={() => setActiveTab('upcoming')} className={`flex-1 py-3 rounded-xl text-sm font-bold ${activeTab === 'upcoming' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>📅 Próximas</button>
-                    <button onClick={() => setActiveTab('history')} className={`flex-1 py-3 rounded-xl text-sm font-bold ${activeTab === 'history' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400'}`}>⏮️ Historial</button>
+                <div className="bg-white p-1.5 rounded-2xl shadow-sm flex flex-wrap gap-1">
+                    <button onClick={() => setActiveTab('upcoming')} className={`flex-1 min-w-[80px] py-2.5 rounded-xl text-[11px] font-bold transition-all ${activeTab === 'upcoming' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>📅 Próximas</button>
+                    <button onClick={() => setActiveTab('history')} className={`flex-1 min-w-[80px] py-2.5 rounded-xl text-[11px] font-bold transition-all ${activeTab === 'history' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>⏮️ Historial</button>
+                    <button onClick={() => setActiveTab('quiz')} className={`flex-1 min-w-[80px] py-2.5 rounded-xl text-[11px] font-bold transition-all ${activeTab === 'quiz' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-400 hover:bg-slate-50'}`}>📝 Daily Quiz</button>
                 </div>
-                <div className="space-y-4">{activeTab === 'upcoming' ? renderSessionList(groupedUpcoming) : renderSessionList(groupedPast)}</div>
+                <div className="space-y-4">
+                    {activeTab === 'upcoming' && renderSessionList(groupedUpcoming)}
+                    {activeTab === 'history' && renderSessionList(groupedPast)}
+                    {activeTab === 'quiz' && (
+                        <div className="space-y-4">
+                            {dailyQuiz ? (
+                                <div className="bg-white rounded-3xl p-6 shadow-xl border border-slate-100 relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                                        <Icon name="quiz" className="text-8xl text-orange-500" />
+                                    </div>
+                                    <div className="relative z-10">
+                                        <div className="flex items-center gap-3 mb-4">
+                                            <div className="size-12 rounded-2xl bg-orange-50 text-orange-500 flex items-center justify-center">
+                                                <Icon name="quiz" className="text-2xl" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-black text-slate-900 text-xl">Reto Diario</h3>
+                                                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Daily Quiz</p>
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed">Completa el reto diario para reforzar lo aprendido en clase y ganar puntos.</p>
+                                        <button 
+                                            onClick={() => setShowQuizModal(true)}
+                                            className="w-full py-4 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-2xl font-black shadow-lg shadow-orange-500/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                        >
+                                            <Icon name="play_arrow" />
+                                            Comenzar Reto
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
+                                    <div className="size-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                                        <Icon name="event_busy" className="text-3xl" />
+                                    </div>
+                                    <p className="text-slate-500 font-medium">No hay reto disponible para hoy.</p>
+                                    <p className="text-xs text-slate-400 mt-1">Vuelve mañana para un nuevo reto.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
             </main>
 
             {/* [UPDATED] 시네마 플레이어 모달 */}
@@ -362,6 +490,23 @@ const StudentPortal: React.FC = () => {
                     url={cinemaData.url} 
                     title={cinemaData.title} 
                     onClose={() => setCinemaData(null)} 
+                />
+            )}
+
+            {/* Daily Quiz Modal */}
+            {showQuizModal && dailyQuiz && (
+                <DailyQuizModal 
+                    quiz={dailyQuiz} 
+                    onClose={() => setShowQuizModal(false)} 
+                />
+            )}
+
+            {/* AI Speaking Challenge Modal */}
+            {showAIModal && student && (
+                <AISpeakingChallenge 
+                    studentId={student.id}
+                    studentName={student.name}
+                    onClose={() => setShowAIModal(false)}
                 />
             )}
         </div>

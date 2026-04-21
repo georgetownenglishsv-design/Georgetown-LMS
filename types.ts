@@ -4,11 +4,22 @@
 // --- NEW: Daily Quiz Types ---
 export interface DailyQuiz {
     id: string; // "1" to "365" (Day of Year)
-    question: string;
-    options: string[]; // [Option A, Option B]
-    correctAnswer: number; // 0 or 1
-    explanation: string; // The "Why" in Spanish
+    topic: string; // NEW: Display topic
+    embedUrl: string; // NEW: Iframe source
+    question?: string;
+    options?: string[]; // [Option A, Option B]
+    correctAnswer?: number; // 0 or 1
+    explanation?: string; // The "Why" in Spanish
     category?: 'Grammar' | 'Vocabulary' | 'Spanglish';
+}
+
+export interface SpeakingProgress {
+  id?: string;
+  studentId: string;
+  date: string; // YYYY-MM-DD
+  secondsUsed: number;
+  isCompleted: boolean;
+  lastUpdated: string; // ISO string
 }
 
 export interface Student {

@@ -18,6 +18,7 @@ import ContactPage from './components/ContactPage';
 import StudentLogin from './components/StudentLogin';
 import StudentPortal from './components/StudentPortal';
 import PlacementTest from './components/PlacementTest'; // Imported
+import TryEmma from './components/TryEmma';
 import { auth } from './firebase';
 import { Icon } from './components/Icon';
 import { syncCurrentUserToFirestore } from './services/db';
@@ -90,6 +91,7 @@ const AppRoutes: React.FC = () => {
       <Route path="/search" element={<CourseSearch />} />
       <Route path="/contact" element={<ContactPage />} />
       <Route path="/placement-test" element={<PlacementTest />} /> 
+      <Route path="/try-emma" element={<TryEmma />} />
       
       {/* Enrollment */}
       <Route path="/enroll" element={
