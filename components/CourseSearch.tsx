@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 // Fix: Use namespace import to bypass missing named exports error
 import * as ReactRouterDOM from 'react-router-dom';
 const { useNavigate } = ReactRouterDOM as any;
-import { getCourses } from '../services/db';
+import { getCourses, recordInternalConversion } from '../services/db';
 import { Course } from '../types';
 import { Icon } from './Icon';
 
@@ -222,6 +222,13 @@ const CourseSearch: React.FC = () => {
             href="https://wa.me/50376805577"
             target="_blank"
             rel="noreferrer"
+            onClick={() => {
+                if (typeof window !== 'undefined') {
+                    if ((window as any).gtag) (window as any).gtag('event', 'contact_whatsapp', { event_category: 'contact', source: 'course_search' });
+                    if ((window as any).fbq) (window as any).fbq('track', 'Contact', { source: 'course_search' });
+                }
+                recordInternalConversion('whatsappContact').catch(console.error);
+            }}
             aria-label="Contactar por WhatsApp" 
             className="group flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-xl shadow-green-500/30 transition-all hover:bg-[#20bd5a] hover:scale-110 active:scale-95"
         >

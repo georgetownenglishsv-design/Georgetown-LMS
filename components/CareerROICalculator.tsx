@@ -65,6 +65,11 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
             if (text) {
                 const json = JSON.parse(text);
                 setResult(json);
+                
+                if (typeof window !== 'undefined') {
+                    if ((window as any).gtag) (window as any).gtag('event', 'calculate_roi', { event_category: 'engagement', role: role });
+                    if ((window as any).fbq) (window as any).fbq('trackCustom', 'CalculateROI', { role: role });
+                }
             }
         } catch (e) {
             setResult({

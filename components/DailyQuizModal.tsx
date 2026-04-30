@@ -8,6 +8,8 @@ interface DailyQuizModalProps {
     onClose: () => void;
 }
 
+import { recordInternalConversion } from '../services/db';
+
 export const DailyQuizModal: React.FC<DailyQuizModalProps> = ({ quiz, onClose }) => {
     const [selectedOption, setSelectedOption] = useState<number | null>(null);
     const [isSubmitted, setIsSubmitted] = useState(false);
@@ -20,6 +22,13 @@ export const DailyQuizModal: React.FC<DailyQuizModalProps> = ({ quiz, onClose })
     const handleSubmit = () => {
         if (selectedOption === null) return;
         setIsSubmitted(true);
+        
+        recordInternalConversion('dailyQuiz').catch(console.error);
+
+        if (typeof window !== 'undefined') {
+            if ((window as any).gtag) (window as any).gtag('event', 'complete_daily_quiz', { event_category: 'engagement' });
+            if ((window as any).fbq) (window as any).fbq('trackCustom', 'CompleteDailyQuiz');
+        }
     };
 
     const isCorrect = selectedOption === quiz.correctAnswer;

@@ -52,12 +52,15 @@ const LoginRoute: React.FC<PropsWithChildren<RouteWrapperProps>> = ({ children, 
 };
 
 import { ToeicMockTestPage } from './components/ToeicMockTestPage';
+import { useMetaPixel } from './hooks/useMetaPixel';
 
 const AppRoutes: React.FC = () => {
   const [userProfile, setUserProfile] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useMetaPixel();
 
   useEffect(() => {
     // Auth State Listener

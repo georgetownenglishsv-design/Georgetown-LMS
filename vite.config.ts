@@ -1,6 +1,7 @@
 
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { resolve } from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -20,6 +21,9 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       chunkSizeWarningLimit: 1600,
       rollupOptions: {
+        input: {
+          main: resolve(__dirname, 'index.html')
+        },
         // Fix: Externalize html2canvas since it is loaded via importmap in index.html
         external: ['html2canvas'],
         output: {

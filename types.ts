@@ -382,7 +382,10 @@ export interface SystemSettings {
   dateFormat: string;
   logoUrl?: string; // New field for Custom Branding
   
-  // Microsoft Integration
+  // Analytics Integrations
+  ga4PropertyId?: string;
+  ga4ServiceAccountJson?: string;
+  metaPixelId?: string;
   microsoftTenantId?: string;
   microsoftClientId?: string;
 }

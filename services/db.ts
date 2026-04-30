@@ -6,6 +6,26 @@ import { generateRefCode } from './microsoft';
 // Re-export firebase instances
 export { db, firebase, functions };
 
+export const recordInternalConversion = async (type: 'placementTest' | 'tryEmma' | 'tryEmmaHomepage' | 'tryEmmaStudent' | 'whatsappContact' | 'mockTest' | 'dailyQuiz' | 'levelTest') => {
+    try {
+        const recordConversion = functions.httpsCallable('recordConversion');
+        await recordConversion({ type });
+    } catch (e) {
+        console.error(`Failed to record conversion: ${type}`, e);
+    }
+};
+
+export const testGA4Connection = async (): Promise<{success: boolean, pageViews?: number, visitors?: number, error?: string}> => {
+    try {
+        const testFn = functions.httpsCallable('testGA4Connection');
+        const result = await testFn();
+        return result.data as any;
+    } catch (e: any) {
+        console.error("Failed to test GA4 connection:", e);
+        return { success: false, error: e.message || "Error al llamar a la función." };
+    }
+};
+
 // --- SPEAKING CHALLENGE SERVICES ---
 export const getTodaySpeakingProgress = async (studentId: string): Promise<SpeakingProgress | null> => {
     try {
@@ -892,16 +912,15 @@ export const validateFirestoreCredential = async (email: string, pass: string): 
 // --- SYSTEM SERVICES ---
 export const getSystemSettings = async (): Promise<SystemSettings> => { 
     try { 
-        const snapshot = await db.collection('settings').limit(1).get(); 
-        if (!snapshot.empty) return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as SystemSettings; 
+        const docSnap = await db.collection('system').doc('settings').get(); 
+        if (docSnap.exists) return { id: docSnap.id, ...docSnap.data() } as SystemSettings; 
         return { emailAlerts: true, systemNotifications: true, paymentAlerts: false, language: 'Español', timezone: 'GMT-6', dateFormat: 'DD/MM/AAAA' }; 
     } catch (e: any) { 
         return { emailAlerts: true, systemNotifications: true, paymentAlerts: false, language: 'Español', timezone: 'GMT-6', dateFormat: 'DD/MM/AAAA' }; 
     } 
 };
 export const saveSystemSettings = async (settings: SystemSettings) => { 
-    if (settings.id) await db.collection('settings').doc(settings.id).update(settings); 
-    else await db.collection('settings').add(settings); 
+    await db.collection('system').doc('settings').set(settings, { merge: true }); 
 };
 export const getSystemLogs = async (): Promise<SystemLog[]> => { 
     try { 

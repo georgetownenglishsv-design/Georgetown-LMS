@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { getBrandInfo, getDailyQuizByDay } from '../services/db';
+import { getBrandInfo, getDailyQuizByDay, recordInternalConversion } from '../services/db';
 import { BrandInfo, DailyQuiz } from '../types';
 import { Icon } from './Icon';
 import * as ReactRouterDOM from 'react-router-dom';
@@ -79,6 +79,14 @@ export const PublicFloatingButtons: React.FC = () => {
       const cleanNumber = brand.whatsappNumber.replace(/[^0-9]/g, '');
       const encodedMessage = encodeURIComponent(message);
       const url = `https://wa.me/${cleanNumber}?text=${encodedMessage}`;
+      
+      if (typeof window !== 'undefined') {
+          if ((window as any).gtag) (window as any).gtag('event', 'contact_whatsapp', { event_category: 'contact', source: 'floating_button' });
+          if ((window as any).fbq) (window as any).fbq('track', 'Contact', { source: 'floating_button' });
+      }
+      
+      recordInternalConversion('whatsappContact').catch(console.error);
+      
       window.open(url, '_blank', 'noopener,noreferrer');
       setIsOpen(false);
   };
@@ -128,7 +136,7 @@ export const PublicFloatingButtons: React.FC = () => {
                                     "{dailyQuiz.question}"
                                 </p>
                                 <div className="flex flex-col gap-3">
-                                    {dailyQuiz.options.map((opt, idx) => (
+                                {dailyQuiz?.options?.map((opt: string, idx: number) => (
                                         <button 
                                             key={idx} 
                                             onClick={() => handleQuizAnswer(idx)}

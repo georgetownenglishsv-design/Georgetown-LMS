@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from './Icon';
 import { Logo } from './Logo';
-import { getPlacementQuestions, savePlacementResult } from '../services/db';
+import { getPlacementQuestions, savePlacementResult, recordInternalConversion } from '../services/db';
 import { Question } from '../types';
 import { auth } from '../firebase';
 // @ts-ignore
@@ -94,6 +94,11 @@ const PlacementTest: React.FC = () => {
         setTestQuestions(selected);
         setStep('test');
         window.scrollTo(0, 0);
+        
+        if (typeof window !== 'undefined') {
+            if ((window as any).gtag) (window as any).gtag('event', 'start_placement_test', { event_category: 'engagement' });
+            if ((window as any).fbq) (window as any).fbq('trackCustom', 'StartPlacementTest');
+        }
     };
 
     const handleAnswer = (optionIndex: number) => {
@@ -157,6 +162,11 @@ const PlacementTest: React.FC = () => {
         setStep('result');
         window.scrollTo(0, 0);
 
+        if (typeof window !== 'undefined') {
+            if ((window as any).gtag) (window as any).gtag('event', 'complete_placement_test', { event_category: 'engagement', level: calcLevel });
+            if ((window as any).fbq) (window as any).fbq('trackCustom', 'CompletePlacementTest', { level: calcLevel });
+        }
+
         try {
             await savePlacementResult({
                 studentName: userInfo.name,
@@ -169,6 +179,8 @@ const PlacementTest: React.FC = () => {
                 status: 'New',
                 levelBreakdown: breakdown
             });
+            // Record Conversion
+            await recordInternalConversion('placementTest');
         } catch(e) {
             console.error("Error saving result", e);
         }
@@ -211,6 +223,15 @@ const PlacementTest: React.FC = () => {
 
     const handleContactWhatsApp = () => {
         const msg = `Hola, he finalizado mi Evaluación de Nivel (Resultado: ${level}). Me gustaría inscribirme.`;
+        
+        if (typeof window !== 'undefined') {
+            if ((window as any).gtag) (window as any).gtag('event', 'contact_whatsapp', { event_category: 'contact', source: 'placement_test' });
+            if ((window as any).fbq) (window as any).fbq('track', 'Contact', { source: 'placement_test' });
+        }
+        
+        // Record Conversion
+        recordInternalConversion('whatsappContact').catch(console.error);
+        
         window.open(`https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(msg)}`, '_blank');
     };
 

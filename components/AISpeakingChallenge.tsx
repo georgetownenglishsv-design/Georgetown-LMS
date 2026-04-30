@@ -21,7 +21,8 @@ class AudioStreamer {
           noiseSuppression: true
         } 
       });
-      this.audioContext = new AudioContext({ sampleRate: 16000 });
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      this.audioContext = new AudioCtx({ sampleRate: 16000 });
       this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       
@@ -112,7 +113,8 @@ class AudioPlayer {
   nextPlayTime: number = 0;
 
   init() {
-    this.audioContext = new AudioContext({ sampleRate: 24000 });
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    this.audioContext = new AudioCtx({ sampleRate: 24000 });
     this.nextPlayTime = this.audioContext.currentTime;
   }
 
@@ -181,6 +183,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const currentOutputTranscriptRef = useRef<string>("");
   const [report, setReport] = useState<{strengths: string, improvement: string, nativePhrasing?: string, vocabulary?: string[], feedback: string} | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   
   const addDebugLog = (log: string) => {
     console.log(log);
@@ -193,16 +196,16 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const saveIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize Gemini AI safely
+  // Move ai initialization into functions safely
   const getApiKey = () => {
     try {
-      return process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-    } catch (e) {
-      return '';
-    }
+      if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
+    } catch(e) {}
+    try {
+      if (process.env.API_KEY) return process.env.API_KEY;
+    } catch(e) {}
+    return '';
   };
-
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
   useEffect(() => {
     const fetchProgress = async () => {
@@ -228,6 +231,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   }, [studentId]);
 
   const startChallenge = async () => {
+    setConnectionError(null);
     setIsConnecting(true);
     addDebugLog("Iniciando sesión...");
     
@@ -258,7 +262,8 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
         }
       });
       addDebugLog("Micrófono conectado. Conectando a Gemini Live...");
-
+      
+      const ai = new GoogleGenAI({ apiKey });
       const sessionPromise = ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         config: {
@@ -339,10 +344,12 @@ CRITICAL RULES:
           },
           onclose: (event: any) => {
             addDebugLog(`Live API Closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`);
+            if (event.code !== 1000) setConnectionError(`Conexión cerrada: ${event.reason || 'Desconocido'}`);
             endChallenge();
           },
           onerror: (err: any) => {
             addDebugLog(`Live API Error: ${err?.message || JSON.stringify(err)}`);
+            setConnectionError(`Error de servidor: ${err?.message || JSON.stringify(err)}`);
             endChallenge();
           }
         }
@@ -350,6 +357,7 @@ CRITICAL RULES:
       
       sessionPromise.catch((err) => {
         addDebugLog(`Session Promise Rejected: ${err?.message || err}`);
+        setConnectionError(`Ocurrió un error al conectar: ${err?.message || err}`);
         endChallenge();
       });
       
@@ -360,7 +368,7 @@ CRITICAL RULES:
       console.error("Failed to start challenge:", err);
       setIsConnecting(false);
       const errorMessage = err?.message || "Error desconocido";
-      alert(`Error al iniciar la sesión: ${errorMessage}`);
+      setConnectionError(errorMessage);
       endChallenge();
     }
   };
@@ -682,6 +690,18 @@ CRITICAL RULES:
                 >
                   {timeLeft < TOTAL_SECONDS ? 'Continuar hablando' : 'Hablar ahora'}
                 </button>
+
+                {connectionError && (
+                  <div className="mt-4 bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl text-sm max-w-sm">
+                    <p className="font-bold mb-1">Error de conexión:</p>
+                    <p>{connectionError}</p>
+                    {debugLogs.length > 0 && (
+                      <div className="mt-2 text-xs opacity-70 font-mono">
+                        {debugLogs[debugLogs.length - 1]}
+                      </div>
+                    )}
+                  </div>
+                )}
               </motion.div>
             ) : isConnecting ? (
               <div className="relative z-10 flex flex-col items-center text-center">
@@ -694,6 +714,12 @@ CRITICAL RULES:
                 <div className="bg-slate-800/80 backdrop-blur-md border border-slate-600 px-8 py-3 rounded-full mb-10 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
                   <span className="text-3xl font-mono font-black text-white tracking-wider">{formatTime(timeLeft)}</span>
                 </div>
+
+                {debugLogs.length > 0 && (
+                  <div className="absolute top-0 right-0 max-w-[200px] bg-black/80 rounded p-2 text-xs text-green-400 font-mono text-left z-50 pointer-events-none">
+                    {debugLogs.map((l, i) => <div key={i}>{l}</div>)}
+                  </div>
+                )}
 
                 {/* Orb Visualizer */}
                 <div className="relative size-48 flex items-center justify-center mb-10">

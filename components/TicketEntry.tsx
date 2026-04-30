@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Icon } from './Icon';
 import { Logo } from './Logo';
 import { validateTicket, startTicketSession, getMockTests } from '../services/mockTest';
+import { recordInternalConversion } from '../services/db';
 import { MockTestTicket, MockTest } from '../types';
 
 interface TicketEntryProps {
@@ -79,6 +80,8 @@ export const TicketEntry: React.FC<TicketEntryProps> = ({ onTicketVerified }) =>
         
         setLoading(true);
         try {
+            recordInternalConversion('mockTest').catch(console.error);
+
             // 1. Validate that ticket has a test assigned
             if (!verifiedTicket.testId) {
                 setError('Este ticket no tiene un examen asignado. Contacte al administrador.');

@@ -138,6 +138,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView = 'dashboard', onNavigate
                 </a>
             )}
 
+            {/* MARKETING ANALYTICS (NEW) */}
+            {canEditStudents() && (
+                <a href="#" onClick={handleNav('analytics')} className={getLinkClasses('analytics')}>
+                    <Icon name="bar_chart" className={currentView !== 'analytics' ? "group-hover:scale-110 transition-transform" : ""} filled={currentView === 'analytics'} />
+                    <span className="text-sm font-medium">Estadísticas & Ads</span>
+                </a>
+            )}
+
             {/* PLACEMENT TESTS (NEW) */}
             {canEditStudents() && (
                 <a href="#" onClick={handleNav('level-tests')} className={getLinkClasses('level-tests')}>

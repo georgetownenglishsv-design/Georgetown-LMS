@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from './Icon';
 import AISpeakingChallenge from './AISpeakingChallenge';
+import { recordInternalConversion } from '../services/db';
 
 const TryEmma: React.FC = () => {
   const [showChallenge, setShowChallenge] = useState(false);
@@ -73,7 +74,14 @@ const TryEmma: React.FC = () => {
               transition={{ delay: 0.8, duration: 0.8 }}
             >
               <button 
-                onClick={() => setShowChallenge(true)}
+                onClick={() => {
+                  if (typeof window !== 'undefined') {
+                    if ((window as any).gtag) (window as any).gtag('event', 'start_try_emma', { event_category: 'engagement' });
+                    if ((window as any).fbq) (window as any).fbq('trackCustom', 'StartTryEmma');
+                  }
+                  recordInternalConversion('tryEmmaHomepage').catch(console.error);
+                  setShowChallenge(true);
+                }}
                 className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all duration-300 bg-transparent border border-white/20 rounded-full hover:bg-white/10 hover:border-white/40 overflow-hidden"
               >
                 <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-blue-500/0 via-blue-500/10 to-purple-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>

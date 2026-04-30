@@ -29,6 +29,7 @@ import TestimonialManager from './TestimonialManager';
 import FAQManager from './FAQManager';
 import TeamsManager from './TeamsManager'; 
 import MarketingTools from './MarketingTools';
+import AnalyticsDashboard from './AnalyticsDashboard'; // NEW IMPORT
 import LevelTestManager from './LevelTestManager'; // Imported
 import PackageList from './PackageList'; // NEW IMPORT
 import { MockTestAdmin } from './MockTestAdmin'; // NEW IMPORT
@@ -138,6 +139,8 @@ const Portal: React.FC<PortalProps> = ({ userProfile, onLogout }) => {
         return <CategoryList />;
       case 'marketing': 
         return <MarketingTools />;
+      case 'analytics':
+        return <AnalyticsDashboard />;
       case 'level-tests': // NEW
         return <LevelTestManager />;
       case 'mock-tests': // NEW ROUTE

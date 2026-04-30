@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from './Icon';
 import { auth } from '../firebase';
 import { AppUser, SystemSettings, PermissionLevel, BrandInfo, MessageTemplate } from '../types';
-import { getUsers, addUser, updateUser, deleteUser, getSystemSettings, saveSystemSettings, syncCurrentUserToFirestore, resetDatabase, verifyDataIntegrity, getBrandInfo, saveBrandInfo, db, functions, getMessageTemplates, saveMessageTemplate } from '../services/db';
+import { getUsers, addUser, updateUser, deleteUser, getSystemSettings, saveSystemSettings, syncCurrentUserToFirestore, resetDatabase, verifyDataIntegrity, getBrandInfo, saveBrandInfo, db, functions, getMessageTemplates, saveMessageTemplate, testGA4Connection } from '../services/db';
 import { linkMicrosoftAccount, exchangeMsCode, disconnectMicrosoftAccount } from '../services/microsoft';
 // Fix: Use namespace import to bypass missing named exports error
 import * as ReactRouterDOM from 'react-router-dom';
@@ -69,6 +69,8 @@ const Settings: React.FC = () => {
       microsoftClientId: ''
   });
   
+  const [testingGA4, setTestingGA4] = useState(false);
+  
   // State for Brand Info
   const [brandInfo, setBrandInfo] = useState<BrandInfo | null>(null);
 
@@ -132,8 +134,42 @@ const Settings: React.FC = () => {
 
   // --- MS AUTH CALLBACK HANDLER ---
   useEffect(() => {
-      // ... (Existing MS Auth Logic - No changes needed here) ...
-  }, [location.search]);
+      const searchParams = new URLSearchParams(location.search);
+      const code = searchParams.get('code');
+      const isDemo = code === 'MOCK_AUTH_CODE_FOR_DEMO';
+
+      if (code && !authProcessed.current) {
+          authProcessed.current = true;
+          setConnecting(true);
+          
+          if (isDemo) {
+               saveSystemSettings({...settings, microsoftTenantId: 'demo-tenant'}).then(() => {
+                   setSettings(s => ({...s, microsoftTenantId: 'demo-tenant'}));
+                   setMsAccountName("DemoUser@georgetown.edu.sv");
+                   setConnecting(false);
+                   navigate('/portal/settings', { replace: true });
+               });
+               return;
+          }
+
+          exchangeMsCode(code)
+              .then(() => getSystemSettings())
+              .then((newSettings) => {
+                  if (newSettings && newSettings.microsoftTenantId) {
+                      setSettings(newSettings);
+                      alert("✅ Cuenta de Microsoft vinculada con éxito.");
+                  }
+              })
+              .catch(err => {
+                  console.error("Exchange Error:", err);
+                  setIntegrationError({ title: "Error de vinculación", msg: err.message || "Error desconocido" });
+              })
+              .finally(() => {
+                  setConnecting(false);
+                  navigate('/portal/settings', { replace: true });
+              });
+      }
+  }, [location.search, navigate]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -195,6 +231,17 @@ const Settings: React.FC = () => {
   const handleRemoveLogo = () => {
       setSettings(prev => ({ ...prev, logoUrl: '' }));
       if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleTestGA4 = async () => {
+      setTestingGA4(true);
+      const res = await testGA4Connection();
+      if (res.success) {
+          alert(`✅ Conexión exitosa a Google Analytics.\n\nDatos recientes:\nVisitas: ${res.visitors}\nVistas de página: ${res.pageViews}`);
+      } else {
+          alert(`❌ Error al conectar con GA4:\n${res.error}`);
+      }
+      setTestingGA4(false);
   };
 
   const handleSaveSettings = async () => {
@@ -704,6 +751,64 @@ const Settings: React.FC = () => {
                                 )}
                             </div>
                         </div>
+
+                         {/* GA4 INTEGRATION */}
+                         <div className="flex flex-col md:flex-row items-start gap-6 mt-8 pt-8 border-t border-slate-200 dark:border-slate-800">
+                             <div className="flex items-center justify-center p-4 bg-orange-500/10 rounded-2xl shrink-0">
+                                 <Icon name="analytics" className="text-orange-500 text-6xl" />
+                             </div>
+                             <div className="flex-1 w-full">
+                                 <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Google Analytics 4 (GA4)</h2>
+                                 <p className="text-slate-500 dark:text-text-secondary text-sm mb-4 leading-relaxed">
+                                     Configure el acceso a la API de Google Analytics para ver estadísticas avanzadas en su Dashboard.
+                                 </p>
+
+                                 <div className="grid grid-cols-1 gap-4 mb-4">
+                                     <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">ID de Propiedad (Property ID)</label>
+                                        <input 
+                                            value={settings.ga4PropertyId || ''} 
+                                            onChange={e => setSettings({...settings, ga4PropertyId: e.target.value})} 
+                                            placeholder="ej. 123456789"
+                                            className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white" 
+                                        />
+                                     </div>
+                                     <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">ID de Meta Pixel</label>
+                                        <input 
+                                            value={settings.metaPixelId || ''} 
+                                            onChange={e => setSettings({...settings, metaPixelId: e.target.value})} 
+                                            placeholder="ej. 1240913734670032"
+                                            className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white" 
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-2">
+                                            Deje esto en blanco si ha insertado el script de Pixel manualmente en index.html. Si ingresa un valor aquí, reemplazará el valor del script y usará este ID.
+                                        </p>
+                                     </div>
+                                     <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2 block">Service Account JSON</label>
+                                        <textarea 
+                                            value={settings.ga4ServiceAccountJson || ''} 
+                                            onChange={e => setSettings({...settings, ga4ServiceAccountJson: e.target.value})} 
+                                            placeholder={'{\n  "type": "service_account",\n  "project_id": "...",\n  "private_key_id": "...",\n...}'}
+                                            rows={6}
+                                            className="w-full bg-slate-50 dark:bg-black/20 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-xs font-mono text-slate-900 dark:text-white" 
+                                        />
+                                        <p className="text-[10px] text-slate-400 mt-2">
+                                            Pegue aquí el contenido completo del archivo JSON generado en Google Cloud Console. 
+                                        </p>
+                                     </div>
+                                 </div>
+                                 <div className="flex justify-end gap-3">
+                                     <button onClick={handleTestGA4} disabled={testingGA4} className="px-6 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-white font-bold text-sm rounded-lg transition-all">
+                                         {testingGA4 ? 'Probando...' : 'Probar Conexión'}
+                                     </button>
+                                     <button onClick={handleSaveSettings} disabled={saving} className="px-6 py-2 bg-primary hover:bg-primary-dark text-white font-bold text-sm rounded-lg shadow-md transition-all">
+                                         {saving ? 'Guardando...' : 'Guardar Credenciales'}
+                                     </button>
+                                 </div>
+                             </div>
+                         </div>
                     </section>
                 )}
             </div>

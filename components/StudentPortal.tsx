@@ -13,7 +13,8 @@ import {
     getStudentPlacementResult,
     getStudentPackages,
     getStudentById,
-    getStudentsByEmail
+    getStudentsByEmail,
+    recordInternalConversion
 } from '../services/db';
 import { Student, ClassSession, BrandInfo, DailyQuiz, PlacementResult, StudentPackage } from '../types';
 import VideoCinema from './VideoCinema';
@@ -304,14 +305,14 @@ const StudentPortal: React.FC = () => {
                                 ? session.manualRecordings 
                                 : (session.recordings || []);
                             
-                            // [UPDATED] Check 15-day expiration
+                            // [UPDATED] Check 28-day expiration (4 weeks)
                             const sessDate = getMidnightDate(session.date);
                             const today = new Date();
                             today.setHours(0,0,0,0);
                             const diffTime = today.getTime() - sessDate.getTime();
                             const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
-                            const isExpired = diffDays > 15;
-                            const remainingDays = 15 - diffDays;
+                            const isExpired = diffDays > 28;
+                            const remainingDays = 28 - diffDays;
 
                             return (
                                 <div key={session.id} className={`p-4 border-l-[6px] ${colorClass.split(' ')[0]}`}>
@@ -330,7 +331,7 @@ const StudentPortal: React.FC = () => {
                                             <div className="flex flex-wrap gap-2 mt-1">
                                                 {isExpired ? (
                                                     <span className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-400 text-xs font-bold border border-slate-200 cursor-not-allowed select-none">
-                                                        <Icon name="history_toggle_off" className="text-sm" /> Grabación Expirada ({'>'}15 días)
+                                                        <Icon name="history_toggle_off" className="text-sm" /> Grabación Expirada ({'>'}28 días)
                                                     </span>
                                                 ) : (
                                                     recs.map((r, i) => (
@@ -402,7 +403,10 @@ const StudentPortal: React.FC = () => {
 
                 {/* AI Tutor Premium Banner */}
                 <button 
-                    onClick={() => setShowAIModal(true)}
+                    onClick={() => {
+                        setShowAIModal(true);
+                        recordInternalConversion('tryEmmaStudent').catch(console.error);
+                    }}
                     className="w-full group relative bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-1 shadow-2xl overflow-hidden active:scale-[0.98] transition-all"
                 >
                     <div className="absolute inset-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 opacity-20 group-hover:opacity-40 transition-opacity duration-500 blur-xl"></div>
