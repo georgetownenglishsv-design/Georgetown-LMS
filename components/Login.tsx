@@ -125,8 +125,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     <div className="relative flex min-h-screen w-full flex-col justify-center items-center overflow-hidden bg-[#111621] text-white selection:bg-primary selection:text-white font-display">
       {/* Background Effects */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-[20%] -right-[10%] w-[70vw] h-[70vw] rounded-full bg-primary/20 blur-[130px]"></div>
-        <div className="absolute -bottom-[20%] -left-[10%] w-[60vw] h-[60vw] rounded-full bg-cyan-500/10 blur-[120px]"></div>
+        <div className="absolute -top-[20%] -right-[10%] w-[120vw] h-[120vw] md:w-[70vw] md:h-[70vw] rounded-full bg-primary/20 blur-[80px] md:blur-[130px]"></div>
+        <div className="absolute -bottom-[20%] -left-[10%] w-[120vw] h-[120vw] md:w-[60vw] md:h-[60vw] rounded-full bg-cyan-500/10 blur-[80px] md:blur-[120px]"></div>
         <div 
           className="absolute inset-0 opacity-20 brightness-100 contrast-150" 
           style={{ backgroundImage: `url("${noiseDataUri}")` }}

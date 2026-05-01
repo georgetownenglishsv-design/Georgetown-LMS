@@ -31,6 +31,7 @@ import TeamsManager from './TeamsManager';
 import MarketingTools from './MarketingTools';
 import AnalyticsDashboard from './AnalyticsDashboard'; // NEW IMPORT
 import LevelTestManager from './LevelTestManager'; // Imported
+import TryEmmaAdmin from './TryEmmaAdmin'; // NEW IMPORT
 import PackageList from './PackageList'; // NEW IMPORT
 import { MockTestAdmin } from './MockTestAdmin'; // NEW IMPORT
 import { Icon } from './Icon';
@@ -143,6 +144,8 @@ const Portal: React.FC<PortalProps> = ({ userProfile, onLogout }) => {
         return <AnalyticsDashboard />;
       case 'level-tests': // NEW
         return <LevelTestManager />;
+      case 'try-emma-leads': // NEW
+        return <TryEmmaAdmin />;
       case 'mock-tests': // NEW ROUTE
         return <MockTestAdmin />;
       case 'memberships': // NEW ROUTE

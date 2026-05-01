@@ -116,10 +116,7 @@ const MarketingTools: React.FC = () => {
 
         try {
             const ai = new GoogleGenAI({ 
-                apiKey: "proxy-key",
-                httpOptions: { 
-                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
-                }
+                apiKey: import.meta.env.VITE_GEMINI_API_KEY
             });
             
             // --- STEP 1: TOPIC GENERATION ---

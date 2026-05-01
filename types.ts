@@ -525,3 +525,12 @@ export interface MockTestResult {
     completedAt: string;
     answers: Record<string, number>; // Student's answers
 }
+
+export interface TryEmmaLead {
+    id?: string;
+    name: string;
+    email: string;
+    whatsapp: string;
+    createdAt?: any;
+    hasContacted?: boolean;
+}

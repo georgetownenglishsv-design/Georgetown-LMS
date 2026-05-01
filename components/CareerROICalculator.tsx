@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Icon } from './Icon';
+import { Logo } from './Logo';
 import { GoogleGenAI } from "@google/genai";
 // Fix: Use namespace import to bypass missing named exports error
 import * as ReactRouterDOM from 'react-router-dom';
@@ -37,10 +38,7 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
         setLoading(true);
         try {
             const ai = new GoogleGenAI({ 
-                apiKey: "proxy-key",
-                httpOptions: { 
-                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
-                }
+                apiKey: import.meta.env.VITE_GEMINI_API_KEY
             });
             // Modified prompt to ensure Spanish response
             const prompt = `Actúa como consultor de carreras experto para El Salvador y Latinoamérica.
@@ -101,6 +99,10 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
                     {!result ? (
                         <div className="space-y-5">
                             <div className="text-center mb-6">
+                                <span className="inline-block px-3 py-1 bg-gold/20 text-gold text-[10px] font-black uppercase tracking-widest rounded-full mb-3">Georgetown AI</span>
+                                <div className="flex justify-center mb-4">
+                                    <Logo className="h-10 md:h-12" />
+                                </div>
                                 <h3 className="text-2xl font-black text-white mb-2">¿Cuánto vale tu inglés?</h3>
                                 <p className="text-slate-400 text-sm">Descubre el impacto financiero real de dominar el idioma en tu carrera.</p>
                             </div>

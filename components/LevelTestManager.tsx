@@ -88,10 +88,7 @@ const LevelTestManager: React.FC = () => {
         setGenerating(true);
         try {
             const ai = new GoogleGenAI({ 
-                apiKey: "proxy-key",
-                httpOptions: { 
-                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
-                }
+                apiKey: import.meta.env.VITE_GEMINI_API_KEY
             });
             const existingTexts = new Set(questions.map(q => q.text ? q.text.trim().toLowerCase() : ""));
 

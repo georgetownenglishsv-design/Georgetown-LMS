@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Icon } from './Icon';
-import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
-import { getTodaySpeakingProgress, updateSpeakingProgress } from '../services/db';
+import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Icon } from "./Icon";
+import { Logo } from "./Logo";
+import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
+import {
+  getTodaySpeakingProgress,
+  updateSpeakingProgress,
+} from "../services/db";
 
 // --- Audio Capture (Mic -> PCM16 Base64) ---
 class AudioStreamer {
@@ -10,22 +14,37 @@ class AudioStreamer {
   mediaStream: MediaStream | null = null;
   processor: ScriptProcessorNode | null = null;
   source: MediaStreamAudioSourceNode | null = null;
-  
+  mediaRecorder: MediaRecorder | null = null;
+  audioChunks: Blob[] = [];
+
   async start(onAudioData: (base64: string, isSpeaking: boolean) => void) {
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ 
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
-          noiseSuppression: true
-        } 
+          noiseSuppression: true,
+        },
       });
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      
+      this.audioChunks = [];
+      try {
+        this.mediaRecorder = new MediaRecorder(this.mediaStream);
+        this.mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) this.audioChunks.push(e.data);
+        };
+        this.mediaRecorder.start();
+      } catch (e) {
+        console.error("MediaRecorder init failed", e);
+      }
+
+      const AudioCtx =
+        window.AudioContext || (window as any).webkitAudioContext;
       this.audioContext = new AudioCtx({ sampleRate: 16000 });
       this.source = this.audioContext.createMediaStreamSource(this.mediaStream);
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-      
+
       let silenceStart: number | null = null;
       const SILENCE_THRESHOLD = 500;
       const HANGOVER_BUFFER_MS = 2000;
@@ -39,7 +58,7 @@ class AudioStreamer {
           pcm16[i] = val;
           sum += Math.abs(val);
         }
-        
+
         const averageVolume = sum / inputData.length;
         const isSpeakingNow = averageVolume > SILENCE_THRESHOLD;
 
@@ -66,9 +85,9 @@ class AudioStreamer {
           const buffer = new ArrayBuffer(pcm16.length * 2);
           const view = new DataView(buffer);
           pcm16.forEach((val, i) => view.setInt16(i * 2, val, true));
-          
+
           // Convert ArrayBuffer to Base64
-          let binary = '';
+          let binary = "";
           const bytes = new Uint8Array(buffer);
           for (let i = 0; i < bytes.byteLength; i++) {
             binary += String.fromCharCode(bytes[i]);
@@ -78,7 +97,7 @@ class AudioStreamer {
           onAudioData("", false);
         }
       };
-      
+
       this.source.connect(this.processor);
       this.processor.connect(this.audioContext.destination);
     } catch (err) {
@@ -86,8 +105,26 @@ class AudioStreamer {
       throw err;
     }
   }
-  
-  stop() {
+
+  async stop(): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+        this.mediaRecorder.onstop = () => {
+          const blob = new Blob(this.audioChunks, {
+            type: this.mediaRecorder?.mimeType || "audio/webm",
+          });
+          this.cleanup();
+          resolve(blob);
+        };
+        this.mediaRecorder.stop();
+      } else {
+        this.cleanup();
+        resolve(null);
+      }
+    });
+  }
+
+  cleanup() {
     if (this.processor) {
       this.processor.disconnect();
       this.processor = null;
@@ -97,7 +134,7 @@ class AudioStreamer {
       this.source = null;
     }
     if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(t => t.stop());
+      this.mediaStream.getTracks().forEach((t) => t.stop());
       this.mediaStream = null;
     }
     if (this.audioContext) {
@@ -120,25 +157,32 @@ class AudioPlayer {
 
   play(base64: string) {
     if (!this.audioContext) return;
-    
+
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
-    
-    const audioBuffer = this.audioContext.createBuffer(1, bytes.length / 2, 24000);
+
+    const audioBuffer = this.audioContext.createBuffer(
+      1,
+      bytes.length / 2,
+      24000,
+    );
     const channelData = audioBuffer.getChannelData(0);
     const dataView = new DataView(bytes.buffer);
     for (let i = 0; i < channelData.length; i++) {
       channelData[i] = dataView.getInt16(i * 2, true) / 32768;
     }
-    
+
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(this.audioContext.destination);
-    
-    const startTime = Math.max(this.audioContext.currentTime, this.nextPlayTime);
+
+    const startTime = Math.max(
+      this.audioContext.currentTime,
+      this.nextPlayTime,
+    );
     source.start(startTime);
     this.nextPlayTime = startTime + audioBuffer.duration;
   }
@@ -159,37 +203,55 @@ interface AISpeakingChallengeProps {
   duration?: number;
 }
 
-const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({ 
-  onClose, 
-  studentId, 
-  studentName = "Guest", 
-  isPromo = false, 
-  duration = 180 
+const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
+  onClose,
+  studentId,
+  studentName = "Guest",
+  isPromo = false,
+  duration = 180,
 }) => {
   const TOTAL_SECONDS = duration;
   const [isActive, setIsActive] = useState(false);
   const [timeLeft, setTimeLeft] = useState(TOTAL_SECONDS);
   const [isConnecting, setIsConnecting] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
+  
+  // Keep global sync for speech recognition
+  useEffect(() => {
+    (window as any).isAiCurrentlySpeaking = aiSpeaking;
+  }, [aiSpeaking]);
   const [userSpeaking, setUserSpeaking] = useState(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  
+
   const [isLoadingProgress, setIsLoadingProgress] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const [transcript, setTranscript] = useState<{speaker: string, text: string}[]>([]);
-  const transcriptRef = useRef<{speaker: string, text: string}[]>([]);
+  const [transcript, setTranscript] = useState<
+    { speaker: string; text: string }[]
+  >([]);
+  const transcriptRef = useRef<{ speaker: string; text: string }[]>([]);
   const currentInputTranscriptRef = useRef<string>("");
   const currentOutputTranscriptRef = useRef<string>("");
-  const [report, setReport] = useState<{strengths: string, improvement: string, nativePhrasing?: string, vocabulary?: string[], feedback: string} | null>(null);
+  const [report, setReport] = useState<{
+    strengths: string;
+    improvement: string;
+    nativePhrasing?: string;
+    vocabulary?: string[];
+    feedback: string;
+  } | null>(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  
+
   const addDebugLog = (log: string) => {
     console.log(log);
-    setDebugLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${log}`].slice(-5));
+    setDebugLogs((prev) =>
+      [
+        ...prev,
+        `${new Date().toISOString().split("T")[1].split(".")[0]} - ${log}`,
+      ].slice(-5),
+    );
   };
-  
+
   const sessionRef = useRef<any>(null);
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
   const audioPlayerRef = useRef<AudioPlayer | null>(null);
@@ -198,7 +260,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
 
   // Move ai initialization into functions safely
   const getApiKey = () => {
-    return 'proxy-key'; // Replaced process.env with proxy key
+    return import.meta.env.VITE_GEMINI_API_KEY || "";
   };
 
   useEffect(() => {
@@ -208,7 +270,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
         return;
       }
       if (!studentId) return;
-      
+
       setIsLoadingProgress(true);
       const progress = await getTodaySpeakingProgress(studentId);
       if (progress) {
@@ -227,22 +289,18 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const startChallenge = async () => {
     setConnectionError(null);
     setIsConnecting(true);
+    setTranscript([]);
+    transcriptRef.current = [];
+    currentOutputTranscriptRef.current = "";
     addDebugLog("Iniciando sesión...");
-    
+
     audioStreamerRef.current = new AudioStreamer();
     audioPlayerRef.current = new AudioPlayer();
     audioPlayerRef.current.init();
 
     try {
-      addDebugLog("Obteniendo configuración...");
-      const configRes = await fetch("/api/gemini-config");
-      const configData = await configRes.json();
-      const apiKey = configData.apiKey;
+      const apiKey = getApiKey();
 
-      if (!apiKey) {
-        throw new Error("API Key no encontrada. Por favor, configura la variable de entorno GEMINI_API_KEY.");
-      }
-      
       addDebugLog("Solicitando acceso al micrófono...");
       let micStreamStarted = false;
       await audioStreamerRef.current.start((base64Data, isSpeaking) => {
@@ -251,7 +309,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
           sessionRef.current.then((session: any) => {
             try {
               session.sendRealtimeInput({
-                audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+                audio: { data: base64Data, mimeType: "audio/pcm;rate=16000" },
               });
             } catch (e) {
               // Ignore errors if session is closed
@@ -260,12 +318,26 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
         }
       });
       addDebugLog("Micrófono conectado. Conectando a Gemini Live...");
-      
-      const ai = new GoogleGenAI({ apiKey });
+
+      const topics = [
+        "food (pupusas versus pizza, favorite snacks)",
+        "hobbies (playing sports, watching movies, listening to music)",
+        "weather (sunny days, rain, feeling hot or cold)",
+        "daily routine (morning coffee, going to work or school)",
+        "animals (having dogs or cats as pets)",
+        "traveling (going to the beach or the mountains in El Salvador)",
+        "weekend plans (relaxing at home or going out)",
+      ];
+      const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+
+      const ai = new GoogleGenAI({
+        apiKey,
+      });
       const sessionPromise = ai.live.connect({
         model: "gemini-3.1-flash-live-preview",
         config: {
           responseModalities: [Modality.AUDIO],
+          inputAudioTranscription: { model: "builtin/speech-to-text" } as any,
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }, // Friendly female voice
           },
@@ -273,11 +345,9 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
 CRITICAL RULES:
 1. LEVEL: Speak strictly at a CEFR A2 to B1 English level. Use very simple words and short sentences (maximum 7-10 words per sentence). Do NOT use complex idioms or advanced grammar.
 2. TONE: Be as enthusiastic and encouraging as a kindergarten or elementary school teacher. Praise the student enthusiastically (e.g., "Excellent!", "Great job!") even for single-word answers.
-3. CONVERSATION STYLE: NEVER ask open-ended questions that might make a beginner freeze (e.g., "What did you do today?"). ALWAYS ask closed-ended, multiple-choice questions (A or B) so the student can just repeat one of your words to answer. (e.g., "Did you eat pupusas or pizza today?", "Are you happy or tired?").
+3. CONVERSATION STYLE: NEVER ask open-ended questions that might make a beginner freeze (e.g., "What did you do today?"). ALWAYS ask closed-ended, multiple-choice questions (A or B) so the student can just repeat one of your words to answer. (e.g., "Do you like the beach or the mountains?", "Are you happy or tired?").
 4. CORRECTIONS: Do not harshly correct grammar. Just naturally repeat the correct sentence in an encouraging way.
-5. START: Warmly greet ${studentName} with high energy, mention something small about living in El Salvador (like the weather or food) to build rapport, and immediately ask a simple A or B question.`,
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
+5. START: Warmly greet ${studentName} with high energy. Your specific conversation topic for today is: ${randomTopic}. Mention something small about living in El Salvador related to this topic to build rapport, and immediately ask a simple A or B question about it. IMPORTANT: Keep the conversation fresh and different each time!`,
         },
         callbacks: {
           onopen: async () => {
@@ -285,7 +355,7 @@ CRITICAL RULES:
             setIsConnecting(false);
             setIsActive(true);
             micStreamStarted = true;
-            
+
             // Start Timer
             timerRef.current = setInterval(() => {
               setTimeLeft((prev) => Math.max(0, prev - 1));
@@ -301,66 +371,131 @@ CRITICAL RULES:
                 return current;
               });
             }, 10000);
+
+            // Force the AI to speak first will be handled in sessionPromise.then()
           },
-          onmessage: (message: LiveServerMessage) => {
-            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+          onmessage: (message: LiveServerMessage | any) => {
+            if (message.setupComplete) {
+              const prompt = `System Command: Greet me warmly using my name (${studentName}), and ask me a simple question to start the conversation right now. Keep it brief.`;
+              sessionPromise.then((session: any) => {
+                try {
+                  if (typeof session.sendClientContent === "function") {
+                    session.sendClientContent({
+                      turns: [{ role: "user", parts: [{ text: prompt }] }],
+                      turnComplete: true,
+                    });
+                  } else if (typeof session.send === "function") {
+                    session.send({ text: prompt });
+                  } else if (typeof session.sendRealtimeInput === "function") {
+                    session.sendRealtimeInput([{ text: prompt }]);
+                  }
+                  addDebugLog(
+                    "Mensaje inicial enviado exitosamente después del setup.",
+                  );
+                } catch (err: any) {
+                  addDebugLog(
+                    `Error al enviar saludo inicial: ${err?.message || err}`,
+                  );
+                }
+              });
+            }
+
+            if (message.serverContent?.interrupted) {
+              addDebugLog("AI fue interrumpida por ruido.");
+            }
+            const base64Audio =
+              message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio) {
               setAiSpeaking(true);
               audioPlayerRef.current?.play(base64Audio);
-              
-              setTimeout(() => setAiSpeaking(false), 500);
+
+              if ((window as any).aiSpeakingTimeout) {
+                clearTimeout((window as any).aiSpeakingTimeout);
+              }
+              (window as any).aiSpeakingTimeout = setTimeout(() => {
+                setAiSpeaking(false);
+              }, 1000);
+            }
+
+            const textPart = message.serverContent?.modelTurn?.parts?.find(
+              (p: any) => p.text,
+            );
+            if (textPart && textPart.text) {
+              currentOutputTranscriptRef.current += textPart.text;
             }
 
             if (message.serverContent?.inputTranscription) {
-               const text = message.serverContent.inputTranscription.text || "";
-               currentInputTranscriptRef.current += text;
-               if (message.serverContent.inputTranscription.finished) {
-                  const newEntry = {speaker: 'Student', text: currentInputTranscriptRef.current};
-                  setTranscript(prev => [...prev, newEntry]);
+              const text = message.serverContent.inputTranscription.text || "";
+              currentInputTranscriptRef.current += text;
+              if (message.serverContent.inputTranscription.finished) {
+                const newEntry = {
+                  speaker: "Student",
+                  text: currentInputTranscriptRef.current.trim(),
+                };
+                if (newEntry.text) {
+                  setTranscript((prev) => [...prev, newEntry]);
                   transcriptRef.current.push(newEntry);
-                  currentInputTranscriptRef.current = "";
-               }
-            }
-            
-            if (message.serverContent?.outputTranscription) {
-               const text = message.serverContent.outputTranscription.text || "";
-               currentOutputTranscriptRef.current += text;
-               if (message.serverContent.outputTranscription.finished) {
-                  const newEntry = {speaker: 'Emma', text: currentOutputTranscriptRef.current};
-                  setTranscript(prev => [...prev, newEntry]);
-                  transcriptRef.current.push(newEntry);
-                  currentOutputTranscriptRef.current = "";
-               }
+                }
+                currentInputTranscriptRef.current = "";
+              }
             }
 
             if (message.serverContent?.interrupted) {
               addDebugLog("AI interrumpida por el usuario.");
             }
             if (message.serverContent?.turnComplete) {
+              if (currentOutputTranscriptRef.current.trim().length > 0) {
+                const newEntry = {
+                  speaker: "Emma",
+                  text: currentOutputTranscriptRef.current.trim(),
+                };
+                setTranscript((prev) => [...prev, newEntry]);
+                transcriptRef.current.push(newEntry);
+                currentOutputTranscriptRef.current = "";
+              }
               addDebugLog("Turno de la AI completado.");
             }
           },
           onclose: (event: any) => {
-            addDebugLog(`Live API Closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`);
-            if (event.code !== 1000) setConnectionError(`Conexión cerrada: ${event.reason || 'Desconocido'}`);
+            addDebugLog(
+              `Live API Closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`,
+            );
+            if (event.code === 1006) {
+              setConnectionError(
+                `Error 1006: La conexión finalizó abruptamente. Por favor, revisa la consola de comandos (terminal) donde levantaste tu servidor local para ver el error HTTP real.`,
+              );
+            } else if (event.code !== 1000) {
+              setConnectionError(
+                `Conexión cerrada: ${event.reason || "Desconocido"} (Code: ${event.code})`,
+              );
+            }
             endChallenge();
           },
           onerror: (err: any) => {
-            addDebugLog(`Live API Error: ${err?.message || JSON.stringify(err)}`);
-            setConnectionError(`Error de servidor: ${err?.message || JSON.stringify(err)}`);
+            addDebugLog(
+              `Live API Error: ${err?.message || JSON.stringify(err)}`,
+            );
+            setConnectionError(
+              `Error de servidor: ${err?.message || JSON.stringify(err)}`,
+            );
             endChallenge();
-          }
-        }
+          },
+        },
       });
-      
-      sessionPromise.catch((err) => {
-        addDebugLog(`Session Promise Rejected: ${err?.message || err}`);
-        setConnectionError(`Ocurrió un error al conectar: ${err?.message || err}`);
-        endChallenge();
-      });
-      
+
+      sessionPromise
+        .then((session: any) => {
+          addDebugLog("Conexión WebSocket abierta. Esperando setupComplete...");
+        })
+        .catch((err) => {
+          addDebugLog(`Session Promise Rejected: ${err?.message || err}`);
+          setConnectionError(
+            `Ocurrió un error al conectar: ${err?.message || err}`,
+          );
+          endChallenge();
+        });
+
       sessionRef.current = sessionPromise;
-      
     } catch (err: any) {
       addDebugLog(`Failed to start challenge: ${err?.message || err}`);
       console.error("Failed to start challenge:", err);
@@ -371,34 +506,63 @@ CRITICAL RULES:
     }
   };
 
-  const generateFeedbackReport = async (finalTranscript: {speaker: string, text: string}[]) => {
+  const generateFeedbackReport = async (
+    finalTranscript: { speaker: string; text: string }[],
+    audioBlob?: Blob
+  ) => {
     setIsGeneratingReport(true);
     try {
-      const transcriptText = finalTranscript.map(t => `${t.speaker}: ${t.text}`).join('\n');
+      const transcriptText = finalTranscript
+        .map((t) => `${t.speaker}: ${t.text}`)
+        .join("\n");
       const apiKey = getApiKey();
       if (!apiKey) return;
-      
-      const genAI = new GoogleGenAI({ 
+
+      const genAI = new GoogleGenAI({
         apiKey,
-        httpOptions: { 
-          baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
-        }
       });
-      const response = await genAI.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: `You are an expert English tutor evaluating a student's speaking session. Based on the following conversation transcript between a student and a tutor, provide a highly detailed, luxurious, and encouraging feedback report for the student.
+
+      const parts: any[] = [];
+      let promptText = `You are an expert English tutor evaluating a student's speaking session. Based on the following conversation transcript AND the provided audio recording (if available), provide a highly detailed, luxurious, and encouraging feedback report for the student. Pay special attention to the student's pronunciation, grammar, and fluency in the audio recording.
         
         Transcript:
         ${transcriptText || "(No conversation recorded)"}
         
         Provide the response in JSON format with the following keys:
-        - strengths: A detailed paragraph highlighting what the student did exceptionally well (e.g., fluency, vocabulary usage, confidence).
-        - improvement: A detailed paragraph highlighting specific areas for improvement, including grammatical corrections if applicable.
+        - strengths: A detailed paragraph highlighting what the student did exceptionally well (e.g., fluency, vocabulary usage, confidence, pronunciation based on audio).
+        - improvement: A detailed paragraph highlighting specific areas for improvement, including grammatical and pronunciation corrections.
         - nativePhrasing: Suggest 2-3 more natural, native-speaker ways to phrase things the student said.
         - vocabulary: A list of 3-5 key vocabulary words or idioms relevant to the conversation topic that the student could learn.
         - feedback: A warm, highly encouraging closing message.
         
-        Respond entirely in Spanish, except for the English examples in 'nativePhrasing' and 'vocabulary'. Make the tone extremely professional, impressive, and motivating.`,
+        Respond entirely in Spanish, except for the English examples in 'nativePhrasing' and 'vocabulary'. Make the tone extremely professional, impressive, and motivating.`;
+
+      parts.push({ text: promptText });
+
+      if (audioBlob) {
+        addDebugLog("Procesando audio final para evaluación...");
+        const base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = reader.result?.toString().split(",")[1] || "";
+            resolve(base64);
+          };
+          reader.readAsDataURL(audioBlob);
+        });
+
+        if (base64Data) {
+          parts.push({
+            inlineData: {
+              data: base64Data,
+              mimeType: audioBlob.type || "audio/webm",
+            },
+          });
+        }
+      }
+
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts }],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -407,29 +571,56 @@ CRITICAL RULES:
               strengths: { type: Type.STRING },
               improvement: { type: Type.STRING },
               nativePhrasing: { type: Type.STRING },
-              vocabulary: { 
+              vocabulary: {
                 type: Type.ARRAY,
-                items: { type: Type.STRING }
+                items: { type: Type.STRING },
               },
-              feedback: { type: Type.STRING }
+              feedback: { type: Type.STRING },
             },
-            required: ["strengths", "improvement", "nativePhrasing", "vocabulary", "feedback"]
-          }
-        }
+            required: [
+              "strengths",
+              "improvement",
+              "nativePhrasing",
+              "vocabulary",
+              "feedback",
+            ],
+          },
+        },
       });
-      
+
       const resultText = response.text;
       if (resultText) {
         // Clean up markdown formatting if present
-        const cleanedText = resultText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const cleanedText = resultText
+          .replace(/```json\n?/g, "")
+          .replace(/```\n?/g, "")
+          .trim();
         const parsed = JSON.parse(cleanedText);
-        if (parsed && typeof parsed === 'object') {
+        if (parsed && typeof parsed === "object") {
           setReport({
-            strengths: typeof parsed.strengths === 'string' ? parsed.strengths : JSON.stringify(parsed.strengths || "Buen trabajo."),
-            improvement: typeof parsed.improvement === 'string' ? parsed.improvement : JSON.stringify(parsed.improvement || "Sigue practicando."),
-            nativePhrasing: typeof parsed.nativePhrasing === 'string' ? parsed.nativePhrasing : (parsed.nativePhrasing ? JSON.stringify(parsed.nativePhrasing) : undefined),
-            vocabulary: Array.isArray(parsed.vocabulary) ? parsed.vocabulary.map((v: any) => typeof v === 'string' ? v : JSON.stringify(v)) : [],
-            feedback: typeof parsed.feedback === 'string' ? parsed.feedback : JSON.stringify(parsed.feedback || "¡Sigue así!")
+            strengths:
+              typeof parsed.strengths === "string"
+                ? parsed.strengths
+                : JSON.stringify(parsed.strengths || "Buen trabajo."),
+            improvement:
+              typeof parsed.improvement === "string"
+                ? parsed.improvement
+                : JSON.stringify(parsed.improvement || "Sigue practicando."),
+            nativePhrasing:
+              typeof parsed.nativePhrasing === "string"
+                ? parsed.nativePhrasing
+                : parsed.nativePhrasing
+                  ? JSON.stringify(parsed.nativePhrasing)
+                  : undefined,
+            vocabulary: Array.isArray(parsed.vocabulary)
+              ? parsed.vocabulary.map((v: any) =>
+                  typeof v === "string" ? v : JSON.stringify(v),
+                )
+              : [],
+            feedback:
+              typeof parsed.feedback === "string"
+                ? parsed.feedback
+                : JSON.stringify(parsed.feedback || "¡Sigue así!"),
           });
         } else {
           throw new Error("Invalid JSON structure returned by LLM");
@@ -438,11 +629,15 @@ CRITICAL RULES:
     } catch (e) {
       console.error("Error generating report", e);
       setReport({
-        strengths: "¡Buen esfuerzo intentando hablar en inglés! Has demostrado valentía al practicar.",
-        improvement: "Sigue practicando para mejorar tu fluidez y confianza al hablar.",
-        nativePhrasing: "En lugar de traducir literalmente, intenta escuchar cómo lo dicen los nativos en películas o series.",
+        strengths:
+          "¡Buen esfuerzo intentando hablar en inglés! Has demostrado valentía al practicar.",
+        improvement:
+          "Sigue practicando para mejorar tu fluidez y confianza al hablar.",
+        nativePhrasing:
+          "En lugar de traducir literalmente, intenta escuchar cómo lo dicen los nativos en películas o series.",
         vocabulary: ["Practice makes perfect", "Keep it up", "Don't give up"],
-        feedback: "¡No te rindas, la práctica constante es la clave del éxito! Estoy muy orgullosa de ti."
+        feedback:
+          "¡No te rindas, la práctica constante es la clave del éxito! Estoy muy orgullosa de ti.",
       });
     } finally {
       setIsGeneratingReport(false);
@@ -450,31 +645,31 @@ CRITICAL RULES:
   };
 
   const handleEarlyTermination = async () => {
-    endChallenge();
+    const audioBlob = await endChallenge();
     setIsCompleted(true);
     setShowReport(true);
     if (!isPromo && studentId) {
       await updateSpeakingProgress(studentId, TOTAL_SECONDS - timeLeft, true);
     }
-    await generateFeedbackReport(transcriptRef.current);
+    await generateFeedbackReport(transcriptRef.current, audioBlob || undefined);
   };
 
   const handleTimeUp = async () => {
-    endChallenge();
+    const audioBlob = await endChallenge();
     setIsCompleted(true);
     setShowReport(true);
     if (!isPromo && studentId) {
       await updateSpeakingProgress(studentId, TOTAL_SECONDS, true);
     }
-    await generateFeedbackReport(transcriptRef.current);
+    await generateFeedbackReport(transcriptRef.current, audioBlob || undefined);
   };
 
-  const endChallenge = () => {
+  const endChallenge = async () => {
     setIsActive(false);
     setIsConnecting(false);
     if (timerRef.current) clearInterval(timerRef.current);
     if (saveIntervalRef.current) clearInterval(saveIntervalRef.current);
-    
+
     // Save final progress if not completed
     setTimeLeft((current) => {
       if (current > 0 && current < TOTAL_SECONDS && !isPromo && studentId) {
@@ -483,19 +678,24 @@ CRITICAL RULES:
       return current;
     });
 
-    audioStreamerRef.current?.stop();
+    const audioBlob = await audioStreamerRef.current?.stop();
     audioPlayerRef.current?.stop();
-    
+
     if (sessionRef.current) {
       sessionRef.current.then((session: any) => {
-        try { session.close(); } catch(e) {}
+        try {
+          session.close();
+        } catch (e) {}
       });
       sessionRef.current = null;
     }
+    return audioBlob;
   };
 
   useEffect(() => {
-    return () => endChallenge();
+    return () => {
+      endChallenge().catch((e) => console.log("Cleanup error:", e));
+    };
   }, []);
 
   useEffect(() => {
@@ -507,18 +707,18 @@ CRITICAL RULES:
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
   return (
     <AnimatePresence>
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4"
       >
-        <motion.div 
+        <motion.div
           initial={{ scale: 0.9, y: 20 }}
           animate={{ scale: 1, y: 0 }}
           exit={{ scale: 0.9, y: 20 }}
@@ -527,125 +727,198 @@ CRITICAL RULES:
           {/* Header */}
           <div className="flex justify-between items-center p-6 border-b border-slate-800 relative z-10 shrink-0">
             <div>
-              <h2 className="text-white font-bold text-lg">Práctica de Speaking ✨</h2>
+              <h2 className="text-white font-bold text-lg">
+                Práctica de Speaking ✨
+              </h2>
               <p className="text-slate-400 text-sm">Tutora Nativa Emma</p>
             </div>
-            <button onClick={onClose} className="size-10 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center hover:bg-slate-700 hover:text-white transition-colors">
+            <button
+              onClick={onClose}
+              className="size-10 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center hover:bg-slate-700 hover:text-white transition-colors"
+            >
               <Icon name="close" />
             </button>
           </div>
 
           {/* Main Content */}
-          <div className="p-6 md:p-8 flex flex-col items-center justify-center min-h-[400px] relative overflow-y-auto flex-1">
-            
+          <div
+            className={`p-6 md:p-8 flex flex-col items-center min-h-[400px] relative overflow-y-auto flex-1 ${showReport ? "justify-start" : "justify-center"}`}
+          >
             {/* Background Aurora */}
             <div className="absolute inset-0 opacity-30 pointer-events-none overflow-hidden">
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500 rounded-full mix-blend-screen filter blur-[80px] animate-pulse"></div>
-              <div className="absolute top-1/2 left-1/4 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-purple-500 rounded-full mix-blend-screen filter blur-[80px] animate-pulse" style={{ animationDelay: '1s' }}></div>
+              <div
+                className="absolute top-1/2 left-1/4 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-purple-500 rounded-full mix-blend-screen filter blur-[80px] animate-pulse"
+                style={{ animationDelay: "1s" }}
+              ></div>
             </div>
 
             {isLoadingProgress ? (
               <div className="relative z-10 flex flex-col items-center text-center">
-                <Icon name="sync" className="text-4xl text-blue-400 animate-spin mb-4" />
+                <Icon
+                  name="sync"
+                  className="text-4xl text-blue-400 animate-spin mb-4"
+                />
                 <p className="text-slate-300">Cargando tu progreso...</p>
               </div>
             ) : showReport ? (
-              <motion.div className="relative z-10 flex flex-col items-center text-center w-full h-full" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}>
+              <motion.div
+                className="relative z-10 flex flex-col items-center text-center w-full h-full"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+              >
                 <div className="flex-1 overflow-y-auto w-full pb-4">
                   <div className="size-24 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_40px_rgba(250,204,21,0.5)]">
                     <Icon name="emoji_events" className="text-5xl text-white" />
                   </div>
-                  <h3 className="text-3xl font-black text-white mb-2 bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 to-orange-500">¡Misión Cumplida!</h3>
-                  <p className="text-slate-300 mb-6 text-lg">Has completado tu speaking de hoy.</p>
-                  
+                  <h3 className="text-3xl font-black text-white mb-2 bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 to-orange-500">
+                    ¡Misión Cumplida!
+                  </h3>
+                  <p className="text-slate-300 mb-6 text-lg">
+                    Has completado tu speaking de hoy.
+                  </p>
+
                   <div className="w-full bg-slate-800/50 border border-slate-700 rounded-2xl p-6 mb-4 backdrop-blur-sm">
                     <div className="flex items-center justify-center space-x-2 mb-4">
                       <Icon name="star" className="text-yellow-400 text-xl" />
-                      <span className="text-white font-bold text-xl">+50 Puntos</span>
+                      <span className="text-white font-bold text-xl">
+                        +50 Puntos
+                      </span>
                     </div>
-                    
+
                     {isGeneratingReport ? (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.9 }} 
-                        animate={{ opacity: 1, scale: 1 }} 
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
                         className="flex flex-col items-center justify-center py-8"
                       >
                         <div className="relative size-16 mb-4">
                           <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
                           <div className="absolute inset-0 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                          <Icon name="auto_awesome" className="absolute inset-0 m-auto text-2xl text-blue-400 animate-pulse" />
+                          <Icon
+                            name="auto_awesome"
+                            className="absolute inset-0 m-auto text-2xl text-blue-400 animate-pulse"
+                          />
                         </div>
-                        <p className="text-blue-300 font-medium animate-pulse">Emma está analizando tu conversación...</p>
+                        <p className="text-blue-300 font-medium animate-pulse">
+                          Emma está analizando tu conversación...
+                        </p>
                       </motion.div>
                     ) : report ? (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 20 }} 
-                        animate={{ opacity: 1, y: 0 }} 
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
                         transition={{ staggerChildren: 0.1 }}
                         className="text-left space-y-5"
                       >
-                        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                        >
                           <h4 className="text-green-400 font-bold text-sm uppercase mb-2 flex items-center gap-2">
-                            <div className="p-1.5 bg-green-500/20 rounded-lg"><Icon name="thumb_up" className="text-sm" /></div>
+                            <div className="p-1.5 bg-green-500/20 rounded-lg">
+                              <Icon name="thumb_up" className="text-sm" />
+                            </div>
                             Puntos Fuertes
                           </h4>
-                          <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">{report.strengths}</p>
+                          <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                            {report.strengths}
+                          </p>
                         </motion.div>
-                        <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}>
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.1 }}
+                        >
                           <h4 className="text-orange-400 font-bold text-sm uppercase mb-2 flex items-center gap-2">
-                            <div className="p-1.5 bg-orange-500/20 rounded-lg"><Icon name="trending_up" className="text-sm" /></div>
+                            <div className="p-1.5 bg-orange-500/20 rounded-lg">
+                              <Icon name="trending_up" className="text-sm" />
+                            </div>
                             Áreas de Mejora
                           </h4>
-                          <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">{report.improvement}</p>
+                          <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                            {report.improvement}
+                          </p>
                         </motion.div>
                         {report.nativePhrasing && (
-                          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }}>
+                          <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.15 }}
+                          >
                             <h4 className="text-blue-400 font-bold text-sm uppercase mb-2 flex items-center gap-2">
-                              <div className="p-1.5 bg-blue-500/20 rounded-lg"><Icon name="record_voice_over" className="text-sm" /></div>
+                              <div className="p-1.5 bg-blue-500/20 rounded-lg">
+                                <Icon
+                                  name="record_voice_over"
+                                  className="text-sm"
+                                />
+                              </div>
                               Expresiones Nativas
                             </h4>
-                            <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 whitespace-pre-line">{report.nativePhrasing}</p>
+                            <p className="text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50 whitespace-pre-line">
+                              {report.nativePhrasing}
+                            </p>
                           </motion.div>
                         )}
-                        {Array.isArray(report.vocabulary) && report.vocabulary.length > 0 && (
-                          <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.18 }}>
-                            <h4 className="text-purple-400 font-bold text-sm uppercase mb-2 flex items-center gap-2">
-                              <div className="p-1.5 bg-purple-500/20 rounded-lg"><Icon name="menu_book" className="text-sm" /></div>
-                              Vocabulario Sugerido
-                            </h4>
-                            <ul className="list-disc list-inside text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
-                              {report.vocabulary.map((word, idx) => (
-                                <li key={idx}>{word}</li>
-                              ))}
-                            </ul>
-                          </motion.div>
-                        )}
-                        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="pt-4 mt-2 border-t border-slate-700/50">
+                        {Array.isArray(report.vocabulary) &&
+                          report.vocabulary.length > 0 && (
+                            <motion.div
+                              initial={{ opacity: 0, x: -20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.18 }}
+                            >
+                              <h4 className="text-purple-400 font-bold text-sm uppercase mb-2 flex items-center gap-2">
+                                <div className="p-1.5 bg-purple-500/20 rounded-lg">
+                                  <Icon name="menu_book" className="text-sm" />
+                                </div>
+                                Vocabulario Sugerido
+                              </h4>
+                              <ul className="list-disc list-inside text-slate-200 text-sm leading-relaxed bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                                {report.vocabulary.map((word, idx) => (
+                                  <li key={idx}>{word}</li>
+                                ))}
+                              </ul>
+                            </motion.div>
+                          )}
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                          className="pt-4 mt-2 border-t border-slate-700/50"
+                        >
                           <div className="flex items-start gap-3">
                             <div className="size-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shrink-0">
-                              <Icon name="smart_toy" className="text-white text-sm" />
+                              <Icon
+                                name="smart_toy"
+                                className="text-white text-sm"
+                              />
                             </div>
-                            <p className="text-blue-200 text-sm italic mt-1">"{report.feedback}"</p>
+                            <p className="text-blue-200 text-sm italic mt-1">
+                              "{report.feedback}"
+                            </p>
                           </div>
                         </motion.div>
                       </motion.div>
                     ) : (
-                      <p className="text-slate-400 text-sm italic">"Great job today, {studentName}! Keep practicing every day to improve your fluency." - Emma</p>
+                      <p className="text-slate-400 text-sm italic">
+                        "Great job today, {studentName}! Keep practicing every
+                        day to improve your fluency." - Emma
+                      </p>
                     )}
                   </div>
                 </div>
 
                 <div className="w-full pt-4 mt-auto shrink-0 border-t border-slate-800/50">
                   {isPromo ? (
-                    <button 
-                      onClick={() => window.location.href = '/register'}
+                    <button
+                      onClick={() => (window.location.href = "/register")}
                       className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:opacity-90 transition-all hover:scale-[1.02] shadow-[0_0_20px_rgba(168,85,247,0.4)] flex items-center justify-center gap-2"
                     >
                       ¡Quiero mi tutor 24/7! Inscribirme
                       <Icon name="arrow_forward" />
                     </button>
                   ) : (
-                    <button 
+                    <button
                       onClick={onClose}
                       className="w-full bg-gradient-to-r from-blue-500 to-purple-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:opacity-90 transition-opacity shadow-lg"
                     >
@@ -655,13 +928,25 @@ CRITICAL RULES:
                 </div>
               </motion.div>
             ) : isCompleted ? (
-              <motion.div className="relative z-10 flex flex-col items-center text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <motion.div
+                className="relative z-10 flex flex-col items-center text-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
                 <div className="size-24 bg-slate-800 rounded-full flex items-center justify-center mb-6 border-2 border-green-500/50 shadow-[0_0_30px_rgba(34,197,94,0.2)]">
-                  <Icon name="check_circle" className="text-5xl text-green-400" />
+                  <Icon
+                    name="check_circle"
+                    className="text-5xl text-green-400"
+                  />
                 </div>
-                <h3 className="text-2xl font-black text-white mb-2">¡Práctica completada!</h3>
-                <p className="text-slate-400 mb-8">Ya has completado tus 3 minutos diarios. ¡Vuelve mañana para seguir practicando con Emma!</p>
-                <button 
+                <h3 className="text-2xl font-black text-white mb-2">
+                  ¡Práctica completada!
+                </h3>
+                <p className="text-slate-400 mb-8">
+                  Ya has completado tus 3 minutos diarios. ¡Vuelve mañana para
+                  seguir practicando con Emma!
+                </p>
+                <button
                   onClick={onClose}
                   className="bg-slate-800 text-white px-8 py-3 rounded-full font-bold hover:bg-slate-700 transition-colors border border-slate-700"
                 >
@@ -669,17 +954,24 @@ CRITICAL RULES:
                 </button>
               </motion.div>
             ) : !isActive && !isConnecting ? (
-              <motion.div className="relative z-10 flex flex-col items-center text-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <motion.div
+                className="relative z-10 flex flex-col items-center text-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
+                <Logo className="h-12 md:h-16 mb-4 drop-shadow-lg brightness-0 invert" />
                 <div className="size-24 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-blue-500/20">
                   <Icon name="mic" className="text-4xl text-white" />
                 </div>
-                <h3 className="text-2xl font-black text-white mb-2">¿Estás listo/a?</h3>
+                <h3 className="text-2xl font-black text-white mb-2">
+                  ¿Estás listo/a?
+                </h3>
                 <p className="text-slate-300 mb-2">
-                  {isPromo 
-                    ? "¡Habla con Emma durante 1 minuto y descubre tu nivel!" 
+                  {isPromo
+                    ? "¡Habla con Emma durante 1 minuto y descubre tu nivel!"
                     : "¡Habla en inglés 3 minutos al día y aumenta tu confianza!"}
                 </p>
-                
+
                 {!isPromo && timeLeft < TOTAL_SECONDS && (
                   <div className="bg-blue-500/20 border border-blue-500/30 text-blue-300 px-4 py-2 rounded-full text-sm mb-6 font-medium">
                     Tiempo restante hoy: {formatTime(timeLeft)}
@@ -687,11 +979,13 @@ CRITICAL RULES:
                 )}
                 <div className="h-6"></div>
 
-                <button 
+                <button
                   onClick={startChallenge}
                   className="bg-white text-slate-900 px-8 py-4 rounded-full font-bold text-lg hover:scale-105 transition-transform shadow-[0_0_20px_rgba(255,255,255,0.3)]"
                 >
-                  {timeLeft < TOTAL_SECONDS ? 'Continuar hablando' : 'Hablar ahora'}
+                  {timeLeft < TOTAL_SECONDS
+                    ? "Continuar hablando"
+                    : "Hablar ahora"}
                 </button>
 
                 {connectionError && (
@@ -708,36 +1002,41 @@ CRITICAL RULES:
               </motion.div>
             ) : isConnecting ? (
               <div className="relative z-10 flex flex-col items-center text-center">
-                <Icon name="sync" className="text-4xl text-blue-400 animate-spin mb-4" />
-                <p className="text-slate-300 font-medium animate-pulse">Conectando con Emma...</p>
+                <Icon
+                  name="sync"
+                  className="text-4xl text-blue-400 animate-spin mb-4"
+                />
+                <p className="text-slate-300 font-medium animate-pulse">
+                  Conectando con Emma...
+                </p>
               </div>
             ) : (
-              <motion.div className="relative z-10 flex flex-col items-center w-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <motion.div
+                className="relative z-10 flex flex-col items-center w-full"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+              >
                 {/* Timer */}
                 <div className="bg-slate-800/80 backdrop-blur-md border border-slate-600 px-8 py-3 rounded-full mb-10 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
-                  <span className="text-3xl font-mono font-black text-white tracking-wider">{formatTime(timeLeft)}</span>
+                  <span className="text-3xl font-mono font-black text-white tracking-wider">
+                    {formatTime(timeLeft)}
+                  </span>
                 </div>
-
-                {debugLogs.length > 0 && (
-                  <div className="absolute top-0 right-0 max-w-[200px] bg-black/80 rounded p-2 text-xs text-green-400 font-mono text-left z-50 pointer-events-none">
-                    {debugLogs.map((l, i) => <div key={i}>{l}</div>)}
-                  </div>
-                )}
 
                 {/* Orb Visualizer */}
                 <div className="relative size-48 flex items-center justify-center mb-10">
                   {/* AI Speaking Waves */}
-                  <motion.div 
-                    animate={{ 
+                  <motion.div
+                    animate={{
                       scale: aiSpeaking ? [1, 1.3, 1] : 1,
-                      opacity: aiSpeaking ? [0.6, 0.9, 0.6] : 0.2
+                      opacity: aiSpeaking ? [0.6, 0.9, 0.6] : 0.2,
                     }}
                     transition={{ repeat: Infinity, duration: 1.5 }}
                     className="absolute inset-0 bg-blue-500 rounded-full filter blur-2xl"
                   />
                   {/* User Speaking Waves */}
-                  <motion.div 
-                    animate={{ 
+                  <motion.div
+                    animate={{
                       scale: userSpeaking ? [1, 1.15, 1] : 1,
                     }}
                     transition={{ repeat: Infinity, duration: 0.5 }}
@@ -745,23 +1044,49 @@ CRITICAL RULES:
                   />
                   {/* Core Orb */}
                   <div className="relative size-28 bg-gradient-to-br from-blue-400 via-indigo-500 to-purple-600 rounded-full shadow-[0_0_40px_rgba(99,102,241,0.6)] border-2 border-white/30 flex items-center justify-center">
-                    <Icon name={aiSpeaking ? "graphic_eq" : "mic"} className="text-white/80 text-4xl" />
+                    <Icon
+                      name={aiSpeaking ? "graphic_eq" : "mic"}
+                      className="text-white/80 text-4xl"
+                    />
                   </div>
                 </div>
 
                 <div className="h-8 flex items-center justify-center">
                   <AnimatePresence mode="wait">
                     {aiSpeaking ? (
-                      <motion.p key="ai" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="text-blue-300 font-medium text-lg">Emma está hablando...</motion.p>
+                      <motion.p
+                        key="ai"
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="text-blue-300 font-medium text-lg"
+                      >
+                        Emma está hablando...
+                      </motion.p>
                     ) : userSpeaking ? (
-                      <motion.p key="user" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="text-purple-300 font-medium text-lg">Escuchando...</motion.p>
+                      <motion.p
+                        key="user"
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="text-purple-300 font-medium text-lg"
+                      >
+                        Escuchando...
+                      </motion.p>
                     ) : (
-                      <motion.p key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-slate-400">¡Habla libremente!</motion.p>
+                      <motion.p
+                        key="idle"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-slate-400"
+                      >
+                        ¡Habla libremente!
+                      </motion.p>
                     )}
                   </AnimatePresence>
                 </div>
 
-                <button 
+                <button
                   onClick={handleEarlyTermination}
                   className="mt-10 px-6 py-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-full flex items-center justify-center hover:bg-red-500 hover:text-white transition-all hover:scale-105 shadow-lg gap-2 font-medium"
                 >

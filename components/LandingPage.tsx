@@ -189,8 +189,8 @@ const LandingPage: React.FC = () => {
           
           {/* Animated Glow */}
           <div className="absolute inset-0 z-0 pointer-events-none">
-            <div className="absolute top-[-50%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-600/20 blur-[80px] mix-blend-screen animate-pulse"></div>
-            <div className="absolute bottom-[-50%] right-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-600/20 blur-[80px] mix-blend-screen animate-pulse" style={{ animationDelay: '1s' }}></div>
+            <div className="absolute top-[-50%] left-[-10%] w-[120vw] h-[120vw] md:w-[50vw] md:h-[50vw] rounded-full bg-blue-600/20 blur-[60px] md:blur-[80px] mix-blend-screen animate-pulse"></div>
+            <div className="absolute bottom-[-50%] right-[-10%] w-[100vw] h-[100vw] md:w-[40vw] md:h-[40vw] rounded-full bg-purple-600/20 blur-[60px] md:blur-[80px] mix-blend-screen animate-pulse" style={{ animationDelay: '1s' }}></div>
           </div>
 
           <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">

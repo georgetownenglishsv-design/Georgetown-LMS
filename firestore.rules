@@ -1,15 +1,47 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if user is authenticated
-    function isAuthenticated() {
-      return request.auth != null;
-    }
 
-    // Default: Deny everything for safety
-    match /{document=**} {
-      allow read, write: if false;
+    // 1. [공개 읽기 허용] 누구나 볼 수 있어야 하는 데이터
+    // 강좌, 시험, 카테고리, 선생님 목록, 웹 설정, 퀴즈, 후기, FAQ 등
+    match /courses/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /exams/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /categories/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /teachers/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /web_store_config/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /web_landing_config/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /web_exam_landings/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /web_exam_details/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /testimonials/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /faqs/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /daily_quizzes/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /settings/{document=**} { allow read: if true; allow write: if request.auth != null; }
+    match /system/{document=**} { allow read: if true; allow write: if request.auth != null; }
+
+    // 2. [제출 허용] 로그인 없이 데이터를 '생성(Create)'만 가능한 곳
+    // 레벨테스트 결과, 수강 신청서, 시험 접수
+    // 주의: create는 허용하되, read/update/delete는 관리자만 가능해야 개인정보가 보호됨
+    match /placement_results/{document=**} {
+      allow create: if true; 
+      allow read, update, delete: if request.auth != null;
+    }
+    match /students/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null;
+    }
+    match /exam_registrations/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null;
+    }
+    
+    // 추가된 공개 제출 폼
+    match /try_emma_leads/{document=**} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null;
+    }
+    match /speaking_progress/{document=**} {
+      allow create, update: if true; 
+      allow read, delete: if request.auth != null;
     }
 
     // --- Mock Test System Rules (Incognito/Public Access) ---
@@ -19,7 +51,7 @@ service cloud.firestore {
     // Admins (authenticated) can manage them.
     match /mock_tests/{testId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if request.auth != null;
     }
 
     // 2. Mock Test Tickets
@@ -27,7 +59,7 @@ service cloud.firestore {
     // Security relies on the Ticket ID being a secret key.
     match /mock_test_tickets/{ticketId} {
       allow read, update: if true;
-      allow create, delete: if isAuthenticated();
+      allow create, delete: if request.auth != null;
     }
 
     // 3. Mock Test Results
@@ -36,41 +68,14 @@ service cloud.firestore {
     match /mock_test_results/{resultId} {
       allow create: if true;
       allow get: if true; // Allow students to view their own result by ID
-      allow list: if isAuthenticated(); // Only admins can list all results
-      allow update, delete: if isAuthenticated();
+      allow list: if request.auth != null; // Only admins can list all results
+      allow update, delete: if request.auth != null;
     }
 
-    // --- Other Public Collections (As per your request) ---
-    
-    // Level Test Results
-    match /level_test_results/{id} {
-      allow create: if true;
-      allow read, write: if isAuthenticated();
-    }
-
-    // Course Enrollments / Applications
-    match /enrollments/{id} {
-      allow create: if true;
-      allow read, write: if isAuthenticated();
-    }
-
-    // Contact Messages
-    match /messages/{id} {
-      allow create: if true;
-      allow read, write: if isAuthenticated();
-    }
-
-    // Speaking Progress
-    match /speaking_progress/{id} {
-      allow create: if true;
-      allow read, write: if isAuthenticated();
-    }
-
-    // --- Admin/User Data ---
-    
-    // Users collection (Strict privacy)
-    match /users/{userId} {
-      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    // 3. [관리자 전용] 나머지는 로그인한 관리자만 접근 가능
+    // 출석부, 수업 세션, 재정 데이터, 유저 목록 등
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }

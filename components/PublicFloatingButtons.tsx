@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { getBrandInfo, getDailyQuizByDay, recordInternalConversion } from '../services/db';
 import { BrandInfo, DailyQuiz } from '../types';
 import { Icon } from './Icon';
+import { Logo } from './Logo';
 import * as ReactRouterDOM from 'react-router-dom';
 const { useNavigate } = ReactRouterDOM as any;
 
@@ -123,7 +124,7 @@ export const PublicFloatingButtons: React.FC = () => {
                     <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white text-center relative">
                         <button onClick={() => setIsQuizOpen(false)} className="absolute top-4 right-4 text-white/70 hover:text-white"><Icon name="close" /></button>
                         <div className="size-12 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3 backdrop-blur-md">
-                            <Icon name="diamond" className="text-2xl text-white" />
+                            <Logo className="h-12 w-auto mx-auto mb-3" iconOnly={true} />
                         </div>
                         <h3 className="text-lg font-black uppercase tracking-tight">Reto del Día</h3>
                         <p className="text-xs opacity-80 font-medium">Spanglish Challenge</p>

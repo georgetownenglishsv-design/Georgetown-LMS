@@ -1,6 +1,6 @@
 
 import { db, firebase, functions } from '../firebase';
-import { Student, Category, Course, AppUser, SystemSettings, Exam, ExamRegistration, Teacher, ClassSession, AttendanceRecord, CourseDetail, WebExamLanding, WebExamDetail, Testimonial, GlobalFAQ, WebStoreConfig, WebLandingConfig, BrandInfo, SystemLog, MessageTemplate, Question, PlacementResult, DailyQuiz, StudentPackage, PackageSlot, SpeakingProgress } from '../types';
+import { Student, Category, Course, AppUser, SystemSettings, Exam, ExamRegistration, Teacher, ClassSession, AttendanceRecord, CourseDetail, WebExamLanding, WebExamDetail, Testimonial, GlobalFAQ, WebStoreConfig, WebLandingConfig, BrandInfo, SystemLog, MessageTemplate, Question, PlacementResult, DailyQuiz, StudentPackage, PackageSlot, SpeakingProgress, TryEmmaLead } from '../types';
 import { generateRefCode } from './microsoft';
 
 // Re-export firebase instances
@@ -1215,4 +1215,27 @@ export const getMockTestResult = async (id: string): Promise<MockTestResult | nu
     const doc = await db.collection('mock_test_results').doc(id).get();
     if (!doc.exists) return null;
     return { id: doc.id, ...doc.data() } as MockTestResult;
+};
+
+// --- Try Emma Leads ---
+export const saveTryEmmaLead = async (lead: Omit<TryEmmaLead, 'id'>) => {
+    const docRef = await db.collection('try_emma_leads').add({
+        ...lead,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        hasContacted: false
+    });
+    return docRef.id;
+};
+
+export const getTryEmmaLeads = async (): Promise<TryEmmaLead[]> => {
+    const snapshot = await db.collection('try_emma_leads').orderBy('createdAt', 'desc').get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as TryEmmaLead));
+};
+
+export const updateTryEmmaLead = async (id: string, data: Partial<TryEmmaLead>) => {
+    await db.collection('try_emma_leads').doc(id).update(data);
+};
+
+export const deleteTryEmmaLead = async (id: string) => {
+    await db.collection('try_emma_leads').doc(id).delete();
 };

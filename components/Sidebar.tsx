@@ -154,6 +154,14 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView = 'dashboard', onNavigate
                 </a>
             )}
 
+            {/* TRY EMMA LEADS */}
+            {canEditStudents() && (
+                <a href="#" onClick={handleNav('try-emma-leads')} className={getLinkClasses('try-emma-leads')}>
+                    <Icon name="record_voice_over" className={currentView !== 'try-emma-leads' ? "group-hover:scale-110 transition-transform" : ""} filled={currentView === 'try-emma-leads'} />
+                    <span className="text-sm font-medium">Try Emma Leads</span>
+                </a>
+            )}
+
             {/* MOCK TESTS (NEW) */}
             {canEditStudents() && (
                 <a href="#" onClick={handleNav('mock-tests')} className={getLinkClasses('mock-tests')}>

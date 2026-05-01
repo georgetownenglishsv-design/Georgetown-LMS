@@ -129,10 +129,7 @@ const CreateCourse: React.FC<CreateCourseProps> = ({ onBack, courseId }) => {
       setAiLoading(true);
       try {
           const ai = new GoogleGenAI({ 
-              apiKey: "proxy-key",
-              httpOptions: { 
-                  baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
-              }
+              apiKey: import.meta.env.VITE_GEMINI_API_KEY
           });
           const prompt = `Escribe una descripción comercial atractiva (máximo 250 caracteres) para un curso llamado "${name}". Categoría: ${category}.`;
           const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });

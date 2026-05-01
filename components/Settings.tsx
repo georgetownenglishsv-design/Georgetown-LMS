@@ -217,15 +217,30 @@ const Settings: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      // ... (Existing Logic) ...
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onloadend = () => {
-          setSettings(prev => ({ ...prev, logoUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+
+      try {
+          setSaving(true);
+          const { storage } = await import('../firebase');
+          
+          const storageRef = storage.ref();
+          const fileRef = storageRef.child(`mock-tests/branding/logo_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '')}`);
+          
+          await fileRef.put(file);
+          const downloadUrl = await fileRef.getDownloadURL();
+          
+          setSettings(prev => ({ ...prev, logoUrl: downloadUrl }));
+          // Note: using the CustomEvent to preview globally
+          const event = new CustomEvent('logo-updated', { detail: downloadUrl });
+          window.dispatchEvent(event);
+      } catch (err) {
+          console.error("Error uploading logo to storage:", err);
+          alert('Hubo un error al subir el logo. Verifica que Storage esté habilitado en Firebase.');
+      } finally {
+          setSaving(false);
+      }
   };
 
   const handleRemoveLogo = () => {
@@ -486,25 +501,6 @@ const Settings: React.FC = () => {
                 {/* TAB: GENERAL */}
                 {activeTab === 'general' && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        {/* Logo Upload */}
-                        <section className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-slate-200 dark:border-[#283933] shadow-sm">
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2"><Icon name="image" /> Logotipo del Sistema</h2>
-                            <div className="flex flex-col gap-4">
-                                <div className="relative group w-full h-40 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer bg-slate-50 dark:bg-black/20 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center overflow-hidden" onClick={() => fileInputRef.current?.click()}>
-                                    {settings.logoUrl ? (
-                                        <>
-                                            <img src={settings.logoUrl} alt="Logo Preview" className="w-full h-full object-contain p-4" />
-                                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold">Click para cambiar</div>
-                                        </>
-                                    ) : (
-                                        <div className="flex flex-col items-center justify-center text-slate-400"><Icon name="cloud_upload" className="text-3xl mb-1" /><span className="text-xs font-medium">Subir Logo (PNG/JPG)</span></div>
-                                    )}
-                                    <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/svg+xml" onChange={handleLogoUpload} />
-                                </div>
-                                {settings.logoUrl && <button onClick={handleRemoveLogo} className="w-full py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 text-xs font-bold hover:bg-slate-50">Restaurar Logo</button>}
-                            </div>
-                        </section>
-
                         {/* Account Settings */}
                         <section className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-slate-200 dark:border-[#283933] shadow-sm">
                             <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2"><Icon name="lock" /> Mi Cuenta</h2>
@@ -530,6 +526,25 @@ const Settings: React.FC = () => {
                 {/* TAB: BRAND INFO */}
                 {activeTab === 'brand' && brandInfo && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Logo Upload */}
+                        <section className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-slate-200 dark:border-[#283933] shadow-sm">
+                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2"><Icon name="image" /> Logotipo del Sistema</h2>
+                            <div className="flex flex-col gap-4">
+                                <div className="relative group w-full h-40 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer bg-slate-50 dark:bg-black/20 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center justify-center overflow-hidden" onClick={() => fileInputRef.current?.click()}>
+                                    {settings.logoUrl ? (
+                                        <>
+                                            <img src={settings.logoUrl} alt="Logo Preview" className="w-full h-full object-contain p-4" />
+                                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold">Click para cambiar</div>
+                                        </>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center text-slate-400"><Icon name="cloud_upload" className="text-3xl mb-1" /><span className="text-xs font-medium">Subir Logo (PNG/JPG)</span></div>
+                                    )}
+                                    <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg, image/svg+xml" onChange={handleLogoUpload} />
+                                </div>
+                                {settings.logoUrl && <button onClick={handleRemoveLogo} className="w-full py-2 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-500 text-xs font-bold hover:bg-slate-50">Restaurar Logo</button>}
+                            </div>
+                        </section>
+
                         <section className="bg-white dark:bg-surface-dark rounded-2xl p-6 border border-slate-200 dark:border-[#283933] shadow-sm">
                             <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Información Básica</h2>
                             <div className="space-y-4">
