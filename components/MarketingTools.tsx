@@ -101,10 +101,7 @@ const MarketingTools: React.FC = () => {
 
     // --- HYBRID GENERATION HANDLER (2-Step) ---
     const handleGenerateQuizzes = async () => {
-        if (!process.env.API_KEY) {
-            alert("⚠️ API Key no configurada.");
-            return;
-        }
+        // Removed check for process.env.API_KEY because it's handled server-side now.
 
         // 1. Ask User for Mode
         const mode = prompt(
@@ -118,7 +115,12 @@ const MarketingTools: React.FC = () => {
         setProgressStatus("Inicializando...");
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ 
+                apiKey: "proxy-key",
+                httpOptions: { 
+                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
+                }
+            });
             
             // --- STEP 1: TOPIC GENERATION ---
             setProgressStatus("Paso 1: Planificando temas únicos...");
@@ -224,6 +226,8 @@ const MarketingTools: React.FC = () => {
                         rawQuizzes.forEach(q => {
                             allNewQuizzes.push({
                                 id: (nextId++).toString(),
+                                topic: q.topic || currentBatchTopics[0] || 'Spanglish',
+                                embedUrl: q.embedUrl || '',
                                 question: q.question,
                                 options: q.options,
                                 correctAnswer: q.correctAnswer,
@@ -489,11 +493,11 @@ const MarketingTools: React.FC = () => {
                                                 <>
                                                     <div className="flex justify-between mb-2">
                                                         <span className="text-[10px] font-bold uppercase text-primary bg-primary/10 px-2 py-0.5 rounded">ID: {q.id}</span>
-                                                        <span className="text-[10px] text-slate-400 font-bold">Respuesta: {String.fromCharCode(65 + q.correctAnswer)}</span>
+                                                        <span className="text-[10px] text-slate-400 font-bold">Respuesta: {q.correctAnswer !== undefined ? String.fromCharCode(65 + q.correctAnswer) : '?'}</span>
                                                     </div>
                                                     <p className="font-bold text-slate-900 dark:text-white text-sm mb-2">{q.question}</p>
                                                     <div className="grid grid-cols-2 gap-2 mb-3">
-                                                        {q.options.map((opt, i) => (
+                                                        {(q.options || []).map((opt, i) => (
                                                             <div key={i} className={`text-xs p-2 rounded border ${i === q.correctAnswer ? 'border-green-200 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'}`}>
                                                                 {String.fromCharCode(65+i)}. {opt}
                                                             </div>

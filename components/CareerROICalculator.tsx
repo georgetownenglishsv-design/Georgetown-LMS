@@ -33,21 +33,15 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
             alert("Por favor selecciona tu área profesional.");
             return;
         }
-        if (!process.env.API_KEY) {
-            setLoading(true);
-            setTimeout(() => {
-                setResult({
-                    increase: "$300 - $500",
-                    message: `Basado en datos generales, un ${role} bilingüe (${targetLevel}) accede a oportunidades internacionales con un incremento salarial significativo.`
-                });
-                setLoading(false);
-            }, 1500);
-            return;
-        }
 
         setLoading(true);
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ 
+                apiKey: "proxy-key",
+                httpOptions: { 
+                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
+                }
+            });
             // Modified prompt to ensure Spanish response
             const prompt = `Actúa como consultor de carreras experto para El Salvador y Latinoamérica.
             El usuario es un "${role}" con nivel de inglés actual "${currentLevel}" buscando llegar a "${targetLevel}".

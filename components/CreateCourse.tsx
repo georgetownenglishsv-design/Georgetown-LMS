@@ -126,14 +126,14 @@ const CreateCourse: React.FC<CreateCourseProps> = ({ onBack, courseId }) => {
   const handleGenerateDescription = async () => {
       if (!name || !category) return alert("Ingrese nombre y categoría.");
       
-      if (!process.env.API_KEY) {
-          alert("⚠️ Falta API Key.\n\nPor favor configure su archivo .env con: API_KEY=su_clave");
-          return;
-      }
-      
       setAiLoading(true);
       try {
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const ai = new GoogleGenAI({ 
+              apiKey: "proxy-key",
+              httpOptions: { 
+                  baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
+              }
+          });
           const prompt = `Escribe una descripción comercial atractiva (máximo 250 caracteres) para un curso llamado "${name}". Categoría: ${category}.`;
           const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });
           if (response.text) setDescription(response.text.trim());

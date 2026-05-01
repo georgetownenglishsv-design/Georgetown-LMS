@@ -198,13 +198,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
 
   // Move ai initialization into functions safely
   const getApiKey = () => {
-    try {
-      if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY;
-    } catch(e) {}
-    try {
-      if (process.env.API_KEY) return process.env.API_KEY;
-    } catch(e) {}
-    return '';
+    return 'proxy-key'; // Replaced process.env with proxy key
   };
 
   useEffect(() => {
@@ -240,7 +234,11 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
     audioPlayerRef.current.init();
 
     try {
-      const apiKey = getApiKey();
+      addDebugLog("Obteniendo configuración...");
+      const configRes = await fetch("/api/gemini-config");
+      const configData = await configRes.json();
+      const apiKey = configData.apiKey;
+
       if (!apiKey) {
         throw new Error("API Key no encontrada. Por favor, configura la variable de entorno GEMINI_API_KEY.");
       }
@@ -380,7 +378,12 @@ CRITICAL RULES:
       const apiKey = getApiKey();
       if (!apiKey) return;
       
-      const genAI = new GoogleGenAI({ apiKey });
+      const genAI = new GoogleGenAI({ 
+        apiKey,
+        httpOptions: { 
+          baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
+        }
+      });
       const response = await genAI.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: `You are an expert English tutor evaluating a student's speaking session. Based on the following conversation transcript between a student and a tutor, provide a highly detailed, luxurious, and encouraging feedback report for the student.

@@ -29,11 +29,6 @@ const LevelTestManager: React.FC = () => {
 
     useEffect(() => {
         fetchData();
-        if (process.env.API_KEY) {
-            console.log("✅ AI System: API Key detected.");
-        } else {
-            console.warn("⚠️ AI System: No API Key found in process.env");
-        }
     }, []);
 
     const fetchData = async () => {
@@ -74,10 +69,7 @@ const LevelTestManager: React.FC = () => {
     };
 
     const handleGenerateQuestions = async () => {
-        if (!process.env.API_KEY) {
-            alert("⚠️ API Key no detectada.\n\n1. 프로젝트 루트 폴더에 '.env' 파일이 있는지 확인하세요.\n2. 내용이 'API_KEY=AIza...' 형식인지 확인하세요.\n3. 파일을 수정했다면 반드시 터미널(서버)을 껐다가 다시 켜세요 (Restart Server).");
-            return;
-        }
+        // Removed check for process.env.API_KEY because it's handled server-side now.
 
         // Limit batch size to prevent AI timeouts/cuts
         const SAFE_BATCH_SIZE = 20;
@@ -95,7 +87,12 @@ const LevelTestManager: React.FC = () => {
 
         setGenerating(true);
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ 
+                apiKey: "proxy-key",
+                httpOptions: { 
+                    baseUrl: `${window.location.protocol}//${window.location.host}/api/gemini`
+                }
+            });
             const existingTexts = new Set(questions.map(q => q.text ? q.text.trim().toLowerCase() : ""));
 
             const prompt = `Generate ${finalGenCount} unique English multiple-choice questions for CEFR level ${genLevel}.
