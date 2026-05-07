@@ -79,7 +79,7 @@ export const PublicFloatingButtons: React.FC = () => {
       if (!brand?.whatsappNumber) return;
       const cleanNumber = brand.whatsappNumber.replace(/[^0-9]/g, '');
       const encodedMessage = encodeURIComponent(message);
-      const url = `https://wa.me/${cleanNumber}?text=${encodedMessage}`;
+      const url = `https://api.whatsapp.com/send?phone=${cleanNumber}&text=${encodedMessage}`;
       
       if (typeof window !== 'undefined') {
           if ((window as any).gtag) (window as any).gtag('event', 'contact_whatsapp', { event_category: 'contact', source: 'floating_button' });
@@ -103,10 +103,10 @@ export const PublicFloatingButtons: React.FC = () => {
   };
 
   const menuOptions = [
-      { label: 'Cursos', icon: 'school', message: 'Hola, info cursos.', color: 'text-blue-600', bg: 'bg-blue-50' },
-      { label: 'Exámenes', icon: 'assignment_turned_in', message: 'Hola, info exámenes.', color: 'text-purple-600', bg: 'bg-purple-50' },
-      { label: 'Ubicación', icon: 'location_on', message: 'Hola, ubicación.', color: 'text-red-500', bg: 'bg-red-50' },
-      { label: 'Soporte', icon: 'support_agent', message: 'Hola, ayuda.', color: 'text-emerald-600', bg: 'bg-emerald-50' }
+      { label: 'Cursos', icon: 'school', message: '¡Hola! 👋 Me gustaría recibir información sobre los cursos 🎓.', color: 'text-blue-600', bg: 'bg-blue-50' },
+      { label: 'Exámenes', icon: 'assignment_turned_in', message: '¡Hola! 👋 Quisiera saber más sobre los exámenes y certificaciones 📝.', color: 'text-purple-600', bg: 'bg-purple-50' },
+      { label: 'Ubicación', icon: 'location_on', message: '¡Hola! 👋 ¿Me podrían compartir la ubicación e información de contacto? 📍', color: 'text-red-500', bg: 'bg-red-50' },
+      { label: 'Soporte', icon: 'support_agent', message: '¡Hola! 👋 Necesito soporte con mi cuenta o plataforma 💻.', color: 'text-emerald-600', bg: 'bg-emerald-50' }
   ];
 
   return (

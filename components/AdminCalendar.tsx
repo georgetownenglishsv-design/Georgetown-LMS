@@ -199,16 +199,16 @@ const AdminCalendar: React.FC = () => {
         
         const firstName = name.split(' ')[0];
         
-        let message = `Hola ${firstName}, bienvenido/a al curso *${courseName}* en Georgetown Academy. 🎓`;
+        let message = `¡Hola ${firstName}! 👋 Bienvenido/a al curso *${courseName}* en Georgetown Academy 🎓✨.`;
         
         if (whatsappLink && whatsappLink.trim() !== '') {
-            message += `\n\nÚnete al grupo de WhatsApp aquí:\n${whatsappLink}`;
+            message += `\n\nÚnete a nuestro grupo oficial de WhatsApp aquí 👇:\n${whatsappLink}`;
         } else {
             // Fallback warning if no link
             alert("⚠️ No hay enlace de grupo de WhatsApp configurado para este curso. Se abrirá el chat solo con el mensaje de bienvenida.");
         }
 
-        const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+        const url = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
         window.open(url, '_blank', 'noopener,noreferrer');
     };
 

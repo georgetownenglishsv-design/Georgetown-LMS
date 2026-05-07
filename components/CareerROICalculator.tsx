@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { Icon } from './Icon';
 import { Logo } from './Logo';
-import { GoogleGenAI } from "@google/genai";
+import { getAppCheckToken } from '../firebase';
+
 // Fix: Use namespace import to bypass missing named exports error
 import * as ReactRouterDOM from 'react-router-dom';
 const { Link } = ReactRouterDOM as any;
@@ -37,9 +38,6 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
 
         setLoading(true);
         try {
-            const ai = new GoogleGenAI({ 
-                apiKey: import.meta.env.VITE_GEMINI_API_KEY
-            });
             // Modified prompt to ensure Spanish response
             const prompt = `Actúa como consultor de carreras experto para El Salvador y Latinoamérica.
             El usuario es un "${role}" con nivel de inglés actual "${currentLevel}" buscando llegar a "${targetLevel}".
@@ -47,11 +45,24 @@ const CareerROICalculator: React.FC<CareerROICalculatorProps> = ({ isOpen, onClo
             Proporciona una frase motivacional corta y persuasiva en ESPAÑOL.
             Output JSON: { "increase": "$XXX - $YYY", "message": "Frase motivacional en Español." }`;
 
-            const response = await ai.models.generateContent({
-                model: "gemini-3-flash-preview",
-                contents: prompt,
-                config: { responseMimeType: "application/json" }
+            const appCheckToken = await getAppCheckToken();
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (appCheckToken) {
+              headers["X-Firebase-AppCheck"] = appCheckToken;
+            }
+
+            const res = await fetch("/api/gemini", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    model: "gemini-2.5-flash",
+                    contents: [{ role: "user", parts: [{ text: prompt }] }],
+                    config: { responseMimeType: "application/json" }
+                })
             });
+
+            if (!res.ok) throw new Error("API request failed");
+            const response = await res.json();
             
             const text = response.text;
             if (text) {

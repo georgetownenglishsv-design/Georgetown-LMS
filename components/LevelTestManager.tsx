@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from './Icon';
 import { getPlacementResults, getPlacementQuestions, batchSaveQuestions, updateQuestion, deleteQuestion, updatePlacementResult, deletePlacementResult, db } from '../services/db';
 import { PlacementResult, Question } from '../types';
-import { GoogleGenAI, Type } from "@google/genai";
+import { getAppCheckToken } from '../firebase';
 
 const LevelTestManager: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'results' | 'questions'>('results');
@@ -44,8 +44,8 @@ const LevelTestManager: React.FC = () => {
 
     const handleWhatsAppContact = (phone: string, name: string, level: string) => {
         const cleanPhone = phone.replace(/[^0-9]/g, '');
-        const msg = `Hola ${name}, vimos que completaste el Test de Nivel en Georgetown Academy con resultado *${level}*. ¿Te gustaría agendar una asesoría para inscribirte?`;
-        window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+        const msg = `¡Hola ${name}! 🌟 Vimos que completaste el Test de Nivel en Georgetown Academy con resultado *${level}* 🎓.\n\n¿Te gustaría agendar una asesoría para inscribirte y llevar tu inglés al siguiente nivel? 🚀`;
+        window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
     };
 
     const toggleContactStatus = async (id: string, currentStatus: string) => {
@@ -87,9 +87,6 @@ const LevelTestManager: React.FC = () => {
 
         setGenerating(true);
         try {
-            const ai = new GoogleGenAI({ 
-                apiKey: import.meta.env.VITE_GEMINI_API_KEY
-            });
             const existingTexts = new Set(questions.map(q => q.text ? q.text.trim().toLowerCase() : ""));
 
             const prompt = `Generate ${finalGenCount} unique English multiple-choice questions for CEFR level ${genLevel}.
@@ -102,26 +99,39 @@ const LevelTestManager: React.FC = () => {
             - level (string): "${genLevel}"
             `;
 
-            const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: prompt,
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                text: { type: Type.STRING },
-                                options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                                correctAnswer: { type: Type.INTEGER },
-                                category: { type: Type.STRING },
-                                level: { type: Type.STRING }
+            const appCheckToken = await getAppCheckToken();
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (appCheckToken) {
+              headers["X-Firebase-AppCheck"] = appCheckToken;
+            }
+
+            const res = await fetch("/api/gemini", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    model: "gemini-2.5-flash",
+                    contents: [{ role: "user", parts: [{ text: prompt }] }],
+                    config: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "ARRAY",
+                            items: {
+                                type: "OBJECT",
+                                properties: {
+                                    text: { type: "STRING" },
+                                    options: { type: "ARRAY", items: { type: "STRING" } },
+                                    correctAnswer: { type: "INTEGER" },
+                                    category: { type: "STRING" },
+                                    level: { type: "STRING" }
+                                }
                             }
                         }
                     }
-                }
+                })
             });
+
+            if (!res.ok) throw new Error("API request failed");
+            const response = await res.json();
 
             const rawText = response.text;
             if (!rawText) throw new Error("No response from AI");

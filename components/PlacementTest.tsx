@@ -222,7 +222,7 @@ const PlacementTest: React.FC = () => {
     };
 
     const handleContactWhatsApp = () => {
-        const msg = `Hola, he finalizado mi Evaluación de Nivel (Resultado: ${level}). Me gustaría inscribirme.`;
+        const msg = `¡Hola! 👋 He finalizado mi Evaluación de Nivel (Resultado: *${level}*) 🎓.\n\nMe gustaría recibir más información para inscribirme. 🚀`;
         
         if (typeof window !== 'undefined') {
             if ((window as any).gtag) (window as any).gtag('event', 'contact_whatsapp', { event_category: 'contact', source: 'placement_test' });
@@ -232,7 +232,7 @@ const PlacementTest: React.FC = () => {
         // Record Conversion
         recordInternalConversion('whatsappContact').catch(console.error);
         
-        window.open(`https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(msg)}`, '_blank');
+        window.open(`https://api.whatsapp.com/send?phone=${WHATSAPP_PHONE}&text=${encodeURIComponent(msg)}`, '_blank');
     };
 
     const handleInstagramClick = () => {

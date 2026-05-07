@@ -3,9 +3,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Icon } from './Icon';
 import { getCourses, getExams, getMessageTemplates, saveMessageTemplate, getCategories, batchSaveDailyQuizzes, getAllDailyQuizzes, deleteDailyQuiz, updateDailyQuiz, deleteAllDailyQuizzes, getUsedQuizTopics, saveUsedQuizTopics } from '../services/db';
 import { Course, Exam, MessageTemplate, Category, DailyQuiz } from '../types';
+import { getAppCheckToken } from '../firebase';
 // @ts-ignore
 import html2canvas from 'html2canvas';
-import { GoogleGenAI, Type } from "@google/genai";
 
 const MarketingTools: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'promo' | 'resources' | 'quiz'>('promo');
@@ -115,10 +115,6 @@ const MarketingTools: React.FC = () => {
         setProgressStatus("Inicializando...");
 
         try {
-            const ai = new GoogleGenAI({ 
-                apiKey: import.meta.env.VITE_GEMINI_API_KEY
-            });
-            
             // --- STEP 1: TOPIC GENERATION ---
             setProgressStatus("Paso 1: Planificando temas únicos...");
             
@@ -143,12 +139,23 @@ const MarketingTools: React.FC = () => {
             ${themeInstruction}
             Return ONLY a raw JSON array of strings. Example: ["'People is' vs 'People are'", "'I have 20 years' mistake"]`;
 
-            // Using generateContent directly as per SDK guidelines for simple text
-            const topicResponse = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: topicPrompt,
-                config: { responseMimeType: "application/json" }
+            const appCheckToken = await getAppCheckToken();
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (appCheckToken) {
+              headers["X-Firebase-AppCheck"] = appCheckToken;
+            }
+
+            const topicRes = await fetch("/api/gemini", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    model: "gemini-2.5-flash",
+                    contents: [{ role: "user", parts: [{ text: topicPrompt }] }],
+                    config: { responseMimeType: "application/json" }
+                })
             });
+            if (!topicRes.ok) throw new Error("API request failed");
+            const topicResponse = await topicRes.json();
 
             const topicJson = topicResponse.text;
             if (!topicJson) throw new Error("AI did not return topics.");
@@ -203,11 +210,17 @@ const MarketingTools: React.FC = () => {
                   "category": "Spanglish"
                 }`;
 
-                const qResponse = await ai.models.generateContent({
-                    model: 'gemini-3-flash-preview',
-                    contents: questionPrompt,
-                    config: { responseMimeType: "application/json" }
+                const qRes = await fetch("/api/gemini", {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify({
+                        model: "gemini-2.5-flash",
+                        contents: [{ role: "user", parts: [{ text: questionPrompt }] }],
+                        config: { responseMimeType: "application/json" }
+                    })
                 });
+                if (!qRes.ok) throw new Error("API request failed");
+                const qResponse = await qRes.json();
 
                 const qJson = qResponse.text;
                 if (qJson) {

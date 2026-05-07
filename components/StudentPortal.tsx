@@ -169,12 +169,7 @@ const StudentPortal: React.FC = () => {
                     const now = new Date();
                     const currentMinutes = now.getHours() * 60 + now.getMinutes();
                     
-                    // [NEW LOGIC]: Filter out sessions that occurred before the student's registration date
-                    const studentRegDate = me.date ? getMidnightDate(me.date).getTime() : 0;
-                    const filteredSessions = allSessions.filter(s => {
-                        const sDate = getMidnightDate(s.date).getTime();
-                        return sDate >= studentRegDate;
-                    });
+                    const filteredSessions = allSessions;
 
                     // [FIXED LOGIC]: Find ALL classes for today, then pick the most relevant one
                     const todaysSessions = filteredSessions.filter(s => {

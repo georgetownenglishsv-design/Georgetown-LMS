@@ -30,7 +30,7 @@ const TryEmmaAdmin: React.FC = () => {
     const handleWhatsAppContact = (phone: string, name: string) => {
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         const msg = `¡Hola ${name}! 🌟 Qué gusto saludarte.\n\nSoy de *Georgetown Academy* 🎓✨. Vimos que estuviste probando nuestra experiencia interactiva con nuestra tutora de Inteligencia Artificial, *Emma* 🤖💬.\n\n¿Qué te pareció probar un pedacito del futuro del aprendizaje? 🚀\n\nMe encantaría compartir contigo cómo nuestra metodología combina tecnología de punta y enseñanza premium 💎 para llevar tu inglés a otro nivel. ¿Tienes un minuto para platicar? 👇`;
-        window.open(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+        window.open(`https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`, '_blank');
     };
 
     const toggleContactStatus = async (id: string, currentStatus: boolean | undefined) => {

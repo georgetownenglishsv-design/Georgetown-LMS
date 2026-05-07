@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Icon } from "./Icon";
 import { Logo } from "./Logo";
-import { GoogleGenAI, LiveServerMessage, Modality, Type } from "@google/genai";
 import {
   getTodaySpeakingProgress,
   updateSpeakingProgress,
 } from "../services/db";
+import { getAppCheckToken } from "../firebase";
 
 // --- Audio Capture (Mic -> PCM16 Base64) ---
 class AudioStreamer {
@@ -27,7 +27,7 @@ class AudioStreamer {
           noiseSuppression: true,
         },
       });
-      
+
       this.audioChunks = [];
       try {
         this.mediaRecorder = new MediaRecorder(this.mediaStream);
@@ -62,40 +62,23 @@ class AudioStreamer {
         const averageVolume = sum / inputData.length;
         const isSpeakingNow = averageVolume > SILENCE_THRESHOLD;
 
-        let shouldTransmit = false;
-
-        if (isSpeakingNow) {
-          silenceStart = null;
-          shouldTransmit = true;
-        } else {
-          if (silenceStart === null) {
-            silenceStart = Date.now();
-            shouldTransmit = true;
-          } else {
-            const silenceDuration = Date.now() - silenceStart;
-            if (silenceDuration < HANGOVER_BUFFER_MS) {
-              shouldTransmit = true;
-            } else {
-              shouldTransmit = false;
-            }
-          }
+        // ALWAYS transmit audio to let Gemini handle its own VAD.
+        // This prevents the WebSocket connection from timing out due to inactivity!
+        const buffer = new ArrayBuffer(pcm16.length * 2);
+        const view = new DataView(buffer);
+        for (let i = 0; i < pcm16.length; i++) {
+          view.setInt16(i * 2, pcm16[i], true);
         }
 
-        if (shouldTransmit) {
-          const buffer = new ArrayBuffer(pcm16.length * 2);
-          const view = new DataView(buffer);
-          pcm16.forEach((val, i) => view.setInt16(i * 2, val, true));
-
-          // Convert ArrayBuffer to Base64
-          let binary = "";
-          const bytes = new Uint8Array(buffer);
-          for (let i = 0; i < bytes.byteLength; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          onAudioData(btoa(binary), isSpeakingNow);
-        } else {
-          onAudioData("", false);
+        // Convert ArrayBuffer to Base64 efficiently
+        let binary = "";
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
         }
+        
+        // We send the PCM stream and pass `isSpeakingNow` so the UI visually responds.
+        onAudioData(btoa(binary), isSpeakingNow);
       };
 
       this.source.connect(this.processor);
@@ -147,27 +130,44 @@ class AudioStreamer {
 // --- Audio Playback (PCM24 Base64 -> Speaker) ---
 class AudioPlayer {
   audioContext: AudioContext | null = null;
-  nextPlayTime: number = 0;
+  nextPlayTime: number = -1;
 
   init() {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     this.audioContext = new AudioCtx({ sampleRate: 24000 });
-    this.nextPlayTime = this.audioContext.currentTime;
+    this.nextPlayTime = -1;
+
+    // Autoplay Policy Bypass Hack for iOS Safari
+    if (this.audioContext.state === "suspended") {
+      this.audioContext.resume().catch((e) => console.warn("AudioContext resume failed:", e));
+    }
+    
+    // Play a tiny silent buffer immediately during synchronous user gesture
+    const buffer = this.audioContext.createBuffer(1, 1, 24000);
+    const source = this.audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(this.audioContext.destination);
+    source.start();
   }
 
   play(base64: string) {
     if (!this.audioContext) return;
+    if (this.audioContext.state === "suspended") {
+      this.audioContext.resume();
+    }
 
+    // 초고속 Base64 디코딩
     const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
+    const length = binary.length;
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
       bytes[i] = binary.charCodeAt(i);
     }
 
     const audioBuffer = this.audioContext.createBuffer(
       1,
       bytes.length / 2,
-      24000,
+      this.audioContext.sampleRate,
     );
     const channelData = audioBuffer.getChannelData(0);
     const dataView = new DataView(bytes.buffer);
@@ -179,12 +179,15 @@ class AudioPlayer {
     source.buffer = audioBuffer;
     source.connect(this.audioContext.destination);
 
-    const startTime = Math.max(
-      this.audioContext.currentTime,
-      this.nextPlayTime,
-    );
-    source.start(startTime);
-    this.nextPlayTime = startTime + audioBuffer.duration;
+    if (
+      this.nextPlayTime === -1 ||
+      this.audioContext.currentTime > this.nextPlayTime
+    ) {
+      this.nextPlayTime = this.audioContext.currentTime + 0.1; // Add 100ms buffering
+    }
+
+    source.start(this.nextPlayTime);
+    this.nextPlayTime += audioBuffer.duration;
   }
 
   stop() {
@@ -215,7 +218,7 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const [timeLeft, setTimeLeft] = useState(TOTAL_SECONDS);
   const [isConnecting, setIsConnecting] = useState(false);
   const [aiSpeaking, setAiSpeaking] = useState(false);
-  
+
   // Keep global sync for speech recognition
   useEffect(() => {
     (window as any).isAiCurrentlySpeaking = aiSpeaking;
@@ -258,11 +261,6 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const saveIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Move ai initialization into functions safely
-  const getApiKey = () => {
-    return import.meta.env.VITE_GEMINI_API_KEY || "";
-  };
-
   useEffect(() => {
     const fetchProgress = async () => {
       if (isPromo) {
@@ -289,8 +287,12 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
   const startChallenge = async () => {
     setConnectionError(null);
     setIsConnecting(true);
-    setTranscript([]);
-    transcriptRef.current = [];
+    
+    // Solo borramos el transcript si es un nuevo desafío desde cero
+    if (timeLeft === TOTAL_SECONDS) {
+      setTranscript([]);
+      transcriptRef.current = [];
+    }
     currentOutputTranscriptRef.current = "";
     addDebugLog("Iniciando sesión...");
 
@@ -299,25 +301,42 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
     audioPlayerRef.current.init();
 
     try {
-      const apiKey = getApiKey();
+      let appCheckToken = "";
+      try {
+        const { firebase } = await import("../firebase");
+        const appCheck = firebase.appCheck();
+        const tokenResult = await appCheck.getToken();
+        appCheckToken = tokenResult.token;
+      } catch (err) {
+        console.warn("No se pudo obtener el token de App Check:", err);
+      }
 
       addDebugLog("Solicitando acceso al micrófono...");
       let micStreamStarted = false;
+
       await audioStreamerRef.current.start((base64Data, isSpeaking) => {
         setUserSpeaking(isSpeaking);
         if (sessionRef.current && micStreamStarted && base64Data) {
-          sessionRef.current.then((session: any) => {
+          const ws = sessionRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
             try {
-              session.sendRealtimeInput({
-                audio: { data: base64Data, mimeType: "audio/pcm;rate=16000" },
-              });
+              ws.send(
+                JSON.stringify({
+                  realtimeInput: {
+                    audio: {
+                      mimeType: "audio/pcm;rate=16000",
+                      data: base64Data,
+                    },
+                  },
+                }),
+              );
             } catch (e) {
               // Ignore errors if session is closed
             }
-          });
+          }
         }
       });
-      addDebugLog("Micrófono conectado. Conectando a Gemini Live...");
+      addDebugLog("Micrófono conectado. Conectando al Backend WebSocket...");
 
       const topics = [
         "food (pupusas versus pizza, favorite snacks)",
@@ -330,81 +349,104 @@ const AISpeakingChallenge: React.FC<AISpeakingChallengeProps> = ({
       ];
       const randomTopic = topics[Math.floor(Math.random() * topics.length)];
 
-      const ai = new GoogleGenAI({
-        apiKey,
-      });
-      const sessionPromise = ai.live.connect({
-        model: "gemini-3.1-flash-live-preview",
-        config: {
-          responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: { model: "builtin/speech-to-text" } as any,
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } }, // Friendly female voice
-          },
-          systemInstruction: `You are Emma, an extremely dynamic, energetic, and friendly American English teacher who has been living in El Salvador for 3 years. You are tutoring a student named ${studentName}.
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/api/ws?appCheckToken=${appCheckToken}`;
+
+      const ws = new WebSocket(wsUrl);
+      sessionRef.current = ws;
+
+      ws.onopen = () => {
+        addDebugLog("Conexión WebSocket abierta estructurando setup...");
+        setIsConnecting(false);
+        setIsActive(true);
+        micStreamStarted = true;
+
+        // Start Timer
+        timerRef.current = setInterval(() => {
+          setTimeLeft((prev) => Math.max(0, prev - 1));
+        }, 1000);
+
+        // Periodic Save (every 10 seconds)
+        saveIntervalRef.current = setInterval(() => {
+          setTimeLeft((current) => {
+            const used = TOTAL_SECONDS - current;
+            if (used > 0 && current > 0 && !isPromo && studentId) {
+              updateSpeakingProgress(studentId, used, false);
+            }
+            return current;
+          });
+        }, 10000);
+
+        const setupMessage = {
+          setup: {
+            model: "models/gemini-3.1-flash-live-preview",
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } },
+              },
+            },
+            systemInstruction: {
+              parts: [
+                {
+                  text: `You are Emma, an extremely dynamic, energetic, and friendly American English teacher who has been living in El Salvador for 3 years. You are tutoring a student named ${studentName}.
 CRITICAL RULES:
 1. LEVEL: Speak strictly at a CEFR A2 to B1 English level. Use very simple words and short sentences (maximum 7-10 words per sentence). Do NOT use complex idioms or advanced grammar.
 2. TONE: Be as enthusiastic and encouraging as a kindergarten or elementary school teacher. Praise the student enthusiastically (e.g., "Excellent!", "Great job!") even for single-word answers.
 3. CONVERSATION STYLE: NEVER ask open-ended questions that might make a beginner freeze (e.g., "What did you do today?"). ALWAYS ask closed-ended, multiple-choice questions (A or B) so the student can just repeat one of your words to answer. (e.g., "Do you like the beach or the mountains?", "Are you happy or tired?").
 4. CORRECTIONS: Do not harshly correct grammar. Just naturally repeat the correct sentence in an encouraging way.
 5. START: Warmly greet ${studentName} with high energy. Your specific conversation topic for today is: ${randomTopic}. Mention something small about living in El Salvador related to this topic to build rapport, and immediately ask a simple A or B question about it. IMPORTANT: Keep the conversation fresh and different each time!`,
-        },
-        callbacks: {
-          onopen: async () => {
-            addDebugLog("Conexión WebSocket abierta.");
-            setIsConnecting(false);
-            setIsActive(true);
-            micStreamStarted = true;
-
-            // Start Timer
-            timerRef.current = setInterval(() => {
-              setTimeLeft((prev) => Math.max(0, prev - 1));
-            }, 1000);
-
-            // Periodic Save (every 10 seconds)
-            saveIntervalRef.current = setInterval(() => {
-              setTimeLeft((current) => {
-                const used = TOTAL_SECONDS - current;
-                if (used > 0 && current > 0 && !isPromo && studentId) {
-                  updateSpeakingProgress(studentId, used, false);
-                }
-                return current;
-              });
-            }, 10000);
-
-            // Force the AI to speak first will be handled in sessionPromise.then()
+                },
+              ],
+            },
           },
-          onmessage: (message: LiveServerMessage | any) => {
-            if (message.setupComplete) {
-              const prompt = `System Command: Greet me warmly using my name (${studentName}), and ask me a simple question to start the conversation right now. Keep it brief.`;
-              sessionPromise.then((session: any) => {
-                try {
-                  if (typeof session.sendClientContent === "function") {
-                    session.sendClientContent({
-                      turns: [{ role: "user", parts: [{ text: prompt }] }],
-                      turnComplete: true,
-                    });
-                  } else if (typeof session.send === "function") {
-                    session.send({ text: prompt });
-                  } else if (typeof session.sendRealtimeInput === "function") {
-                    session.sendRealtimeInput([{ text: prompt }]);
-                  }
-                  addDebugLog(
-                    "Mensaje inicial enviado exitosamente después del setup.",
-                  );
-                } catch (err: any) {
-                  addDebugLog(
-                    `Error al enviar saludo inicial: ${err?.message || err}`,
-                  );
-                }
-              });
-            }
+        };
+        ws.send(JSON.stringify(setupMessage));
+      };
 
-            if (message.serverContent?.interrupted) {
-              addDebugLog("AI fue interrumpida por ruido.");
-            }
-            const base64Audio =
-              message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+      ws.onmessage = async (event) => {
+        let message: any;
+        try {
+          let dataStr = event.data;
+          if (event.data instanceof Blob) {
+            dataStr = await event.data.text();
+          } else if (event.data instanceof ArrayBuffer) {
+            dataStr = new TextDecoder().decode(event.data);
+          }
+          message = JSON.parse(dataStr);
+        } catch (e) {
+          console.error("Failed to parse message", e);
+          return;
+        }
+
+        const setupComplete = message.setupComplete || message.setup_complete;
+        if (setupComplete) {
+          const prompt = `System Command: Greet me warmly using my name (${studentName}), and ask me a simple question to start the conversation right now. Keep it brief.`;
+          const clientContent = {
+            clientContent: {
+              turns: [{ role: "user", parts: [{ text: prompt }] }],
+              turnComplete: true,
+            },
+          };
+          ws.send(JSON.stringify(clientContent));
+          addDebugLog(
+            "Mensaje inicial enviado exitosamente después del setup.",
+          );
+        }
+
+        const serverContent = message.serverContent || message.server_content;
+
+        if (serverContent?.interrupted) {
+          addDebugLog("AI fue interrumpida por ruido.");
+        }
+
+        const modelTurn = serverContent?.modelTurn || serverContent?.model_turn;
+
+        if (modelTurn?.parts) {
+          for (const p of modelTurn.parts) {
+            const inlineData = p.inlineData || p.inline_data;
+            const base64Audio = inlineData?.data;
+
             if (base64Audio) {
               setAiSpeaking(true);
               audioPlayerRef.current?.play(base64Audio);
@@ -417,85 +459,69 @@ CRITICAL RULES:
               }, 1000);
             }
 
-            const textPart = message.serverContent?.modelTurn?.parts?.find(
-              (p: any) => p.text,
-            );
-            if (textPart && textPart.text) {
-              currentOutputTranscriptRef.current += textPart.text;
+            if (p.text) {
+              currentOutputTranscriptRef.current += p.text;
             }
+          }
+        }
 
-            if (message.serverContent?.inputTranscription) {
-              const text = message.serverContent.inputTranscription.text || "";
-              currentInputTranscriptRef.current += text;
-              if (message.serverContent.inputTranscription.finished) {
-                const newEntry = {
-                  speaker: "Student",
-                  text: currentInputTranscriptRef.current.trim(),
-                };
-                if (newEntry.text) {
-                  setTranscript((prev) => [...prev, newEntry]);
-                  transcriptRef.current.push(newEntry);
-                }
-                currentInputTranscriptRef.current = "";
-              }
+        const inputTranscription =
+          serverContent?.inputTranscription ||
+          serverContent?.input_transcription;
+        if (inputTranscription) {
+          const text = inputTranscription.text || "";
+          currentInputTranscriptRef.current += text;
+          if (inputTranscription.finished) {
+            const newEntry = {
+              speaker: "Student",
+              text: currentInputTranscriptRef.current.trim(),
+            };
+            if (newEntry.text) {
+              setTranscript((prev) => [...prev, newEntry]);
+              transcriptRef.current.push(newEntry);
             }
+            currentInputTranscriptRef.current = "";
+          }
+        }
 
-            if (message.serverContent?.interrupted) {
-              addDebugLog("AI interrumpida por el usuario.");
-            }
-            if (message.serverContent?.turnComplete) {
-              if (currentOutputTranscriptRef.current.trim().length > 0) {
-                const newEntry = {
-                  speaker: "Emma",
-                  text: currentOutputTranscriptRef.current.trim(),
-                };
-                setTranscript((prev) => [...prev, newEntry]);
-                transcriptRef.current.push(newEntry);
-                currentOutputTranscriptRef.current = "";
-              }
-              addDebugLog("Turno de la AI completado.");
-            }
-          },
-          onclose: (event: any) => {
-            addDebugLog(
-              `Live API Closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`,
-            );
-            if (event.code === 1006) {
-              setConnectionError(
-                `Error 1006: La conexión finalizó abruptamente. Por favor, revisa la consola de comandos (terminal) donde levantaste tu servidor local para ver el error HTTP real.`,
-              );
-            } else if (event.code !== 1000) {
-              setConnectionError(
-                `Conexión cerrada: ${event.reason || "Desconocido"} (Code: ${event.code})`,
-              );
-            }
-            endChallenge();
-          },
-          onerror: (err: any) => {
-            addDebugLog(
-              `Live API Error: ${err?.message || JSON.stringify(err)}`,
-            );
-            setConnectionError(
-              `Error de servidor: ${err?.message || JSON.stringify(err)}`,
-            );
-            endChallenge();
-          },
-        },
-      });
 
-      sessionPromise
-        .then((session: any) => {
-          addDebugLog("Conexión WebSocket abierta. Esperando setupComplete...");
-        })
-        .catch((err) => {
-          addDebugLog(`Session Promise Rejected: ${err?.message || err}`);
+        const turnComplete =
+          serverContent?.turnComplete || serverContent?.turn_complete;
+        if (turnComplete) {
+          if (currentOutputTranscriptRef.current.trim().length > 0) {
+            const newEntry = {
+              speaker: "Emma",
+              text: currentOutputTranscriptRef.current.trim(),
+            };
+            setTranscript((prev) => [...prev, newEntry]);
+            transcriptRef.current.push(newEntry);
+            currentOutputTranscriptRef.current = "";
+          }
+          addDebugLog("Turno de la AI completado.");
+        }
+      };
+
+      ws.onclose = (event) => {
+        addDebugLog(
+          `WS Closed: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`,
+        );
+        if (event.code === 1006) {
           setConnectionError(
-            `Ocurrió un error al conectar: ${err?.message || err}`,
+            `Error 1006: La conexión finalizó abruptamente. El backend podría no estar respondiendo.`,
           );
-          endChallenge();
-        });
+        } else if (event.code !== 1000) {
+          setConnectionError(
+            `Conexión cerrada: ${event.reason || "Desconocido"} (Code: ${event.code})`,
+          );
+        }
+        endChallenge();
+      };
 
-      sessionRef.current = sessionPromise;
+      ws.onerror = (err: any) => {
+        addDebugLog(`WS Error`);
+        setConnectionError(`Error de servidor WebSocket.`);
+        endChallenge();
+      };
     } catch (err: any) {
       addDebugLog(`Failed to start challenge: ${err?.message || err}`);
       console.error("Failed to start challenge:", err);
@@ -508,31 +534,29 @@ CRITICAL RULES:
 
   const generateFeedbackReport = async (
     finalTranscript: { speaker: string; text: string }[],
-    audioBlob?: Blob
+    audioBlob?: Blob | null
   ) => {
     setIsGeneratingReport(true);
     try {
       const transcriptText = finalTranscript
         .map((t) => `${t.speaker}: ${t.text}`)
         .join("\n");
-      const apiKey = getApiKey();
-      if (!apiKey) return;
-
-      const genAI = new GoogleGenAI({
-        apiKey,
-      });
 
       const parts: any[] = [];
-      let promptText = `You are an expert English tutor evaluating a student's speaking session. Based on the following conversation transcript AND the provided audio recording (if available), provide a highly detailed, luxurious, and encouraging feedback report for the student. Pay special attention to the student's pronunciation, grammar, and fluency in the audio recording.
-        
+      let promptText = `You are an expert English tutor evaluating a student's speaking session. Based on the following conversation transcript and the audio recording provided, provide a highly detailed, luxurious, and encouraging feedback report for the student.
+
+      Deeply analyze both their text (for topic maintenance) and their audio (for pronunciation, fluency, and grammatical errors in speech) if provided. If no audio is provided, rely on the transcript.
+      
+      IMPORTANT: If the transcript is mostly empty and no audio is present, STILL generate the JSON strictly matching the schema. Just write a highly encouraging message in the strengths, improvement, and feedback fields saying that they should try using their microphone again, and provide generic vocabulary/phrases. YOU MUST OUTPUT VALID JSON ONLY.
+
         Transcript:
         ${transcriptText || "(No conversation recorded)"}
-        
+
         Provide the response in JSON format with the following keys:
-        - strengths: A detailed paragraph highlighting what the student did exceptionally well (e.g., fluency, vocabulary usage, confidence, pronunciation based on audio).
-        - improvement: A detailed paragraph highlighting specific areas for improvement, including grammatical and pronunciation corrections.
-        - nativePhrasing: Suggest 2-3 more natural, native-speaker ways to phrase things the student said.
-        - vocabulary: A list of 3-5 key vocabulary words or idioms relevant to the conversation topic that the student could learn.
+        - strengths: A detailed paragraph highlighting what the student did exceptionally well (e.g., pronunciation, vocabulary usage, conversational flow). If empty, encourage them to speak up!
+        - improvement: A detailed paragraph highlighting specific areas for improvement, focusing strictly on grammatical corrections, word choice, and pronunciation.
+        - nativePhrasing: Suggest 2-3 more natural, native-speaker ways to phrase things the student said. Quote their original phrasing first. If none, provide a generic useful English phrase.
+        - vocabulary: A list of 3-5 key vocabulary words or idioms relevant to the conversation topic that the student could learn to express themselves better next time.
         - feedback: A warm, highly encouraging closing message.
         
         Respond entirely in Spanish, except for the English examples in 'nativePhrasing' and 'vocabulary'. Make the tone extremely professional, impressive, and motivating.`;
@@ -540,53 +564,82 @@ CRITICAL RULES:
       parts.push({ text: promptText });
 
       if (audioBlob) {
-        addDebugLog("Procesando audio final para evaluación...");
-        const base64Data = await new Promise<string>((resolve) => {
+        try {
           const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = reader.result?.toString().split(",")[1] || "";
-            resolve(base64);
-          };
-          reader.readAsDataURL(audioBlob);
-        });
-
-        if (base64Data) {
+          const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              if (result) {
+                const base64 = result.split(',')[1];
+                resolve(base64);
+              } else {
+                reject(new Error("Failed to read audio blob"));
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(audioBlob);
+          });
+          const base64Data = await base64Promise;
+          
           parts.push({
             inlineData: {
               data: base64Data,
               mimeType: audioBlob.type || "audio/webm",
-            },
+            }
           });
+          console.log("Attached audio blob of size:", audioBlob.size, "mime:", audioBlob.type);
+        } catch (e) {
+          console.error("Error attaching audio blob:", e);
         }
       }
 
-      const response = await genAI.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              strengths: { type: Type.STRING },
-              improvement: { type: Type.STRING },
-              nativePhrasing: { type: Type.STRING },
-              vocabulary: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
+      console.log("Sending to /api/gemini with transcript:", transcriptText);
+      const appCheckToken = await getAppCheckToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (appCheckToken) {
+        headers["X-Firebase-AppCheck"] = appCheckToken;
+      }
+
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts }],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                strengths: { type: "STRING" },
+                improvement: { type: "STRING" },
+                nativePhrasing: { type: "STRING" },
+                vocabulary: {
+                  type: "ARRAY",
+                  items: { type: "STRING" },
+                },
+                feedback: { type: "STRING" },
               },
-              feedback: { type: Type.STRING },
+              required: [
+                "strengths",
+                "improvement",
+                "nativePhrasing",
+                "vocabulary",
+                "feedback",
+              ],
             },
-            required: [
-              "strengths",
-              "improvement",
-              "nativePhrasing",
-              "vocabulary",
-              "feedback",
-            ],
           },
-        },
+        }),
       });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Backend proxy error:", errorText);
+        throw new Error(`Failed to generate report from backend proxy: ${res.status} ${errorText}`);
+      }
+
+      const response = await res.json();
+      console.log("Response from /api/gemini:", response);
 
       const resultText = response.text;
       if (resultText) {
@@ -651,7 +704,7 @@ CRITICAL RULES:
     if (!isPromo && studentId) {
       await updateSpeakingProgress(studentId, TOTAL_SECONDS - timeLeft, true);
     }
-    await generateFeedbackReport(transcriptRef.current, audioBlob || undefined);
+    await generateFeedbackReport(transcriptRef.current, audioBlob);
   };
 
   const handleTimeUp = async () => {
@@ -661,7 +714,7 @@ CRITICAL RULES:
     if (!isPromo && studentId) {
       await updateSpeakingProgress(studentId, TOTAL_SECONDS, true);
     }
-    await generateFeedbackReport(transcriptRef.current, audioBlob || undefined);
+    await generateFeedbackReport(transcriptRef.current, audioBlob);
   };
 
   const endChallenge = async () => {
@@ -682,11 +735,9 @@ CRITICAL RULES:
     audioPlayerRef.current?.stop();
 
     if (sessionRef.current) {
-      sessionRef.current.then((session: any) => {
-        try {
-          session.close();
-        } catch (e) {}
-      });
+      try {
+        sessionRef.current.close();
+      } catch (e) {}
       sessionRef.current = null;
     }
     return audioBlob;

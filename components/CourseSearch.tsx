@@ -219,7 +219,7 @@ const CourseSearch: React.FC = () => {
             <span className="material-symbols-outlined text-xl">arrow_upward</span>
         </button>
         <a 
-            href="https://wa.me/50376805577"
+            href="https://api.whatsapp.com/send?phone=50376805577"
             target="_blank"
             rel="noreferrer"
             onClick={() => {

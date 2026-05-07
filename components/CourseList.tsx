@@ -71,6 +71,9 @@ const CourseList: React.FC<CourseListProps> = ({ onNavigate }) => {
 
     const [retryLoading, setRetryLoading] = useState<string | null>(null);
     const [isRolloverOpen, setIsRolloverOpen] = useState(false);
+    
+    // Delete Modal State
+    const [deleteModal, setDeleteModal] = useState<{isOpen: boolean, course: Course | null}>({ isOpen: false, course: null });
 
     const fetchData = async () => {
         setLoading(true);
@@ -102,29 +105,20 @@ const CourseList: React.FC<CourseListProps> = ({ onNavigate }) => {
     }, [activeTab]);
 
     // --- SMART DELETE HANDLER ---
-    const handleDelete = async (course: Course) => {
-        // [UPDATED] Direct deletion allowed for Active/Concluded with warning
-        const studentCount = await getStudentCountByCourse(course.id);
-        
-        let confirmMsg = `⚠️ ¿Eliminar curso: "${course.name}"?\nEsta acción es IRREVERSIBLE.`;
-        
-        if (course.status === 'Active' || course.status === 'Concluded') {
-            confirmMsg += `\n\nATENCIÓN: Este curso está en estado ${course.status}.`;
-        }
+    const handleDeleteClick = (course: Course) => {
+        setDeleteModal({ isOpen: true, course });
+    };
 
-        let includeStudents = false;
-
-        if (studentCount > 0) {
-            confirmMsg += `\n\n📌 HAY ${studentCount} ESTUDIANTES INSCRITOS.\n\n¿Desea ELIMINAR también a los ${studentCount} estudiantes?\n[Aceptar] = Eliminar Curso Y Estudiantes\n[Cancelar] = No hacer nada`;
-            if (!confirm(confirmMsg)) return;
-            includeStudents = true;
-        } else {
-            if (!confirm(confirmMsg)) return;
-        }
+    const confirmDeleteCourseOnly = async () => {
+        const { course } = deleteModal;
+        if (!course) return;
 
         try {
-            await deleteCourseWithStudents(course.id, course.name, includeStudents);
-            alert("Curso eliminado correctamente.");
+            // includeStudents = false: Only deletes course, class_sessions, and course_details
+            await deleteCourseWithStudents(course.id, course.name, false);
+            alert(`✅ El curso "${course.name}" ha sido eliminado. Los estudiantes inscritos se mantienen intactos.`);
+            setDeleteModal({ isOpen: false, course: null });
+            
             if (activeTab === 'Archived') {
                 const updated = await getArchivedCourses();
                 setArchivedCourses(updated);
@@ -133,7 +127,7 @@ const CourseList: React.FC<CourseListProps> = ({ onNavigate }) => {
             }
         } catch (e: any) {
             console.error(e);
-            alert("Error al eliminar.");
+            alert("Error al eliminar el curso.");
         }
     };
 
@@ -382,8 +376,8 @@ const CourseList: React.FC<CourseListProps> = ({ onNavigate }) => {
                                                 
                                                 <button onClick={() => onNavigate('create-course', course.id)} className="p-2.5 text-slate-500 hover:text-primary transition-colors bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg" title="Editar"><Icon name="edit" /></button>
                                                 
-                                                {/* Delete Button (Always visible now) */}
-                                                <button onClick={() => handleDelete(course)} className="p-2.5 text-slate-500 hover:text-red-500 transition-colors bg-slate-100 hover:bg-red-50 dark:bg-slate-800 dark:hover:bg-red-900/20 rounded-lg" title="Eliminar"><Icon name="delete" /></button>
+                                                {/* Delete Button */}
+                                                <button onClick={() => handleDeleteClick(course)} className="p-2.5 text-slate-500 hover:text-red-500 transition-colors bg-slate-100 hover:bg-red-50 dark:bg-slate-800 dark:hover:bg-red-900/20 rounded-lg" title="Eliminar"><Icon name="delete" /></button>
                                             </div>
                                         </div>
                                     </div>
@@ -401,6 +395,47 @@ const CourseList: React.FC<CourseListProps> = ({ onNavigate }) => {
                 activeCourses={courses.filter(c => c.status === 'Active')}
                 onSuccess={fetchData}
             />
+
+            {/* Delete Confirmation Modal */}
+            {deleteModal.isOpen && deleteModal.course && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-surface-dark w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        <div className="p-6 md:p-8 flex flex-col items-center text-center">
+                            <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/20 text-red-600 flex items-center justify-center mb-6">
+                                <Icon name="warning" className="text-3xl" />
+                            </div>
+                            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Eliminar Curso</h2>
+                            <p className="text-slate-500 dark:text-slate-400 mb-6">
+                                Estás a punto de eliminar el curso <strong className="text-slate-700 dark:text-white">{deleteModal.course.name}</strong>.
+                            </p>
+                            
+                            <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-500/20 rounded-xl p-4 mb-8 text-left w-full">
+                                <p className="text-sm font-bold text-orange-800 dark:text-orange-400 mb-1 flex items-center gap-2">
+                                    <Icon name="info" className="text-base" /> Acción Cautelosa
+                                </p>
+                                <p className="text-xs text-orange-700/80 dark:text-orange-300/80">
+                                    Solo se eliminará la información del curso, el detalle y las sesiones de clase. <strong>Los estudiantes inscritos no serán eliminados.</strong>
+                                </p>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-3 w-full">
+                                <button 
+                                    onClick={() => setDeleteModal({ isOpen: false, course: null })}
+                                    className="flex-1 px-6 py-3 bg-slate-100 dark:bg-surface-highlight text-slate-700 dark:text-white font-bold rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button 
+                                    onClick={confirmDeleteCourseOnly}
+                                    className="flex-1 px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors"
+                                >
+                                     강좌만 삭제 (Eliminar Curso)
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </main>
     );
 };

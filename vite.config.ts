@@ -11,6 +11,16 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, (process as any).cwd(), '');
 
   return {
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+        }
+      }
+    },
     plugins: [react()],
     define: {
       // Expose the GEMINI_API_KEY safely to the client-side code as empty string to prevent accidental exposure but satisfy types

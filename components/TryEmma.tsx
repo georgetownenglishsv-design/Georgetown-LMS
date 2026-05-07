@@ -14,11 +14,10 @@ const TryEmma: React.FC = () => {
   // Form state
   const [formData, setFormData] = useState({
     name: '',
-    email: '',
     whatsapp: ''
   });
 
-  const isFormValid = formData.name.trim() !== '' && formData.email.trim() !== '' && formData.whatsapp.trim() !== '';
+  const isFormValid = formData.name.trim() !== '' && formData.whatsapp.trim().length >= 8;
 
   const handleStart = async () => {
     if (!isFormValid) return;
@@ -33,7 +32,7 @@ const TryEmma: React.FC = () => {
       // Save lead (non-blocking)
       saveTryEmmaLead({
         name: formData.name.trim(),
-        email: formData.email.trim(),
+        email: '', // Pass empty string to prevent DB errors if the schema requires it, or ignore if optional
         whatsapp: formData.whatsapp.trim()
       }).catch(err => {
         console.error("No se pudo guardar el lead:", err);
@@ -134,25 +133,17 @@ const TryEmma: React.FC = () => {
                     <input
                       type="tel"
                       className="w-full bg-black/50 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all font-light"
-                      placeholder="Ej. +503 7000 0000"
+                      placeholder="Ej. 70000000"
                       value={formData.whatsapp}
-                      onChange={e => setFormData(p => ({ ...p, whatsapp: e.target.value }))}
+                      onChange={e => {
+                        const numericValue = e.target.value.replace(/\D/g, '');
+                        setFormData(p => ({ ...p, whatsapp: numericValue }));
+                      }}
                     />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 ml-1">Correo Electrónico</label>
-                  <div className="relative">
-                    <Icon name="email" className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                    <input
-                      type="email"
-                      className="w-full bg-black/50 border border-white/10 rounded-2xl py-3 pl-12 pr-4 text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all font-light"
-                      placeholder="tu@email.com"
-                      value={formData.email}
-                      onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
-                    />
-                  </div>
+                  {formData.whatsapp.length > 0 && formData.whatsapp.length < 8 && (
+                    <p className="text-[10px] text-red-400 mt-1 ml-2">Ingresa al menos 8 números.</p>
+                  )}
                 </div>
 
                 <div className="pt-4">

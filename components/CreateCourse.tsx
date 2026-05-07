@@ -4,7 +4,7 @@ import { Icon } from './Icon';
 import { getCategories, addCourse, getCourseById, updateCourse } from '../services/db';
 import { Category } from '../types';
 import { generateRefCode, createTeamsTeam } from '../services/microsoft';
-import { GoogleGenAI } from "@google/genai";
+import { getAppCheckToken } from '../firebase';
 
 interface CreateCourseProps {
     onBack: () => void;
@@ -128,11 +128,25 @@ const CreateCourse: React.FC<CreateCourseProps> = ({ onBack, courseId }) => {
       
       setAiLoading(true);
       try {
-          const ai = new GoogleGenAI({ 
-              apiKey: import.meta.env.VITE_GEMINI_API_KEY
-          });
           const prompt = `Escribe una descripción comercial atractiva (máximo 250 caracteres) para un curso llamado "${name}". Categoría: ${category}.`;
-          const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt });
+          
+          const appCheckToken = await getAppCheckToken();
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (appCheckToken) {
+            headers["X-Firebase-AppCheck"] = appCheckToken;
+          }
+
+          const res = await fetch("/api/gemini", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                  model: "gemini-2.5-flash",
+                  contents: [{ role: "user", parts: [{ text: prompt }] }]
+              })
+          });
+          
+          if (!res.ok) throw new Error("API request failed");
+          const response = await res.json();
           if (response.text) setDescription(response.text.trim());
       } catch (error: any) {
           alert(`Error AI: ${error.message}`);
