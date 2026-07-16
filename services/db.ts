@@ -527,6 +527,20 @@ export const batchDeleteSessionsByIds = async (ids: string[]) => {
         } 
     } catch (e) { throw e; } 
 };
+
+export const batchUpdateSessions = async (updates: { id: string, data: Partial<ClassSession> }[]) => {
+    try {
+        const chunkSize = 400;
+        for (let i = 0; i < updates.length; i += chunkSize) {
+            const chunk = updates.slice(i, i + chunkSize);
+            const batch = db.batch();
+            chunk.forEach(update => {
+                batch.update(db.collection('class_sessions').doc(update.id), update.data);
+            });
+            await batch.commit();
+        }
+    } catch (e) { throw e; }
+};
 export const checkTeacherAvailability = async (teacherId: string, date: string, startTime: string, endTime: string, excludeSessionId?: string): Promise<boolean> => { 
     const snapshot = await db.collection('class_sessions').where('teacherId', '==', teacherId).where('date', '==', date).get(); 
     if (snapshot.empty) return true; 

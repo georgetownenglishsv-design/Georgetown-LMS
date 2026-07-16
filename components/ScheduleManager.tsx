@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icon } from './Icon';
-import { getCourses, getTeachers, getAllClassSessions, batchCreateSessions, batchDeleteSessionsByIds } from '../services/db';
+import { getCourses, getTeachers, getAllClassSessions, batchCreateSessions, batchDeleteSessionsByIds, batchUpdateSessions } from '../services/db';
 import { Course, Teacher, ClassSession } from '../types';
 
 const ScheduleManager: React.FC = () => {
@@ -273,7 +273,7 @@ const ScheduleManager: React.FC = () => {
             const courseDates = generateCourseDates(targetCourse); // Use full course range
             const courseDateStrings = courseDates.map(d => d.dateStr);
 
-            // 1. Fetch sessions to delete (Only MY sessions for THIS course in THIS duration)
+            // 1. Fetch existing sessions (Only MY sessions for THIS course in THIS duration)
             const existingSessions = sessions.filter(s => 
                 s.courseId === targetCourse.id && 
                 courseDateStrings.includes(s.date) &&
@@ -281,12 +281,10 @@ const ScheduleManager: React.FC = () => {
             );
 
             const toDeleteIds: string[] = [];
+            const toUpdateData: { id: string, data: any }[] = [];
             const toCreateData: any[] = [];
 
-            // Mark old sessions for deletion
-            existingSessions.forEach(s => toDeleteIds.push(s.id));
-
-            // Generate new sessions
+            // Generate new sessions info
             const duration = (() => {
                 const [h1, m1] = assignStartTime.split(':').map(Number);
                 const [h2, m2] = assignEndTime.split(':').map(Number);
@@ -296,34 +294,69 @@ const ScheduleManager: React.FC = () => {
             // --- 3. PRESENCIAL FIX: Handle missing link ---
             const safeMeetingLink = targetCourse.mode === 'online' ? (targetCourse.meetingLink || '') : '';
 
+            // 2. Find sessions to add or update
             selectedDates.forEach(dateStr => {
                 // Ensure date is within course range (sanity check)
                 if (!courseDateStrings.includes(dateStr)) return;
 
-                const [y,m,day] = dateStr.split('-').map(Number);
-                const dateObj = new Date(y, m-1, day);
+                const existingForDate = existingSessions.filter(s => s.date === dateStr);
 
-                toCreateData.push({
-                    courseId: targetCourse.id,
-                    courseName: targetCourse.name,
-                    teacherId: assignTeacherId,
-                    teacherName: teacherName,
-                    date: dateStr,
-                    startTime: assignStartTime,
-                    endTime: assignEndTime,
-                    durationMinutes: duration,
-                    dayOfWeek: dateObj.getDay(),
-                    mode: targetCourse.mode === 'online' ? 'Online' : 'Presencial',
-                    room: assignRoom,
-                    status: 'Programada',
-                    meetingLink: safeMeetingLink // Use sanitized link
-                });
+                if (existingForDate.length > 0) {
+                    // Update the first one
+                    const sessionToUpdate = existingForDate[0];
+                    toUpdateData.push({
+                        id: sessionToUpdate.id,
+                        data: {
+                            startTime: assignStartTime,
+                            endTime: assignEndTime,
+                            durationMinutes: duration,
+                            room: assignRoom,
+                            mode: targetCourse.mode === 'online' ? 'Online' : 'Presencial',
+                            meetingLink: safeMeetingLink
+                        }
+                    });
+
+                    // If there are duplicates for some reason, mark them for deletion
+                    if (existingForDate.length > 1) {
+                        for (let i = 1; i < existingForDate.length; i++) {
+                            toDeleteIds.push(existingForDate[i].id);
+                        }
+                    }
+                } else {
+                    // Create new session
+                    const [y,m,day] = dateStr.split('-').map(Number);
+                    const dateObj = new Date(y, m-1, day);
+                    toCreateData.push({
+                        courseId: targetCourse.id,
+                        courseName: targetCourse.name,
+                        teacherId: assignTeacherId,
+                        teacherName: teacherName,
+                        date: dateStr,
+                        startTime: assignStartTime,
+                        endTime: assignEndTime,
+                        durationMinutes: duration,
+                        dayOfWeek: dateObj.getDay(),
+                        mode: targetCourse.mode === 'online' ? 'Online' : 'Presencial',
+                        room: assignRoom,
+                        status: 'Programada',
+                        meetingLink: safeMeetingLink
+                    });
+                }
+            });
+
+            // 3. Find sessions to delete
+            existingSessions.forEach(s => {
+                if (!selectedDates.has(s.date) && !toDeleteIds.includes(s.id)) {
+                    toDeleteIds.push(s.id);
+                }
             });
 
             // Execute
-            const { batchDeleteSessionsByIds } = await import('../services/db');
             if (toDeleteIds.length > 0) {
                 await batchDeleteSessionsByIds(toDeleteIds);
+            }
+            if (toUpdateData.length > 0) {
+                await batchUpdateSessions(toUpdateData);
             }
             if (toCreateData.length > 0) {
                 await batchCreateSessions(toCreateData);
