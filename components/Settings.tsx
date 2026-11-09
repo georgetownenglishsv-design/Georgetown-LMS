@@ -231,6 +231,19 @@ const Settings: React.FC = () => {
           await fileRef.put(file);
           const downloadUrl = await fileRef.getDownloadURL();
           
+          try {
+              const base64DataUrl = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(file);
+              });
+              localStorage.setItem('gtea_system_logo_base64_source', downloadUrl);
+              localStorage.setItem('gtea_system_logo_base64_cache', base64DataUrl);
+          } catch (cacheErr) {
+              console.warn("Could not cache logo base64:", cacheErr);
+          }
+
           setSettings(prev => ({ ...prev, logoUrl: downloadUrl }));
           // Note: using the CustomEvent to preview globally
           const event = new CustomEvent('logo-updated', { detail: downloadUrl });

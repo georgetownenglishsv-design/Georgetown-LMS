@@ -843,6 +843,62 @@ export const toggleExamPaymentStatus = async (regId: string, examId: string) => 
     }); 
     return true; 
 };
+export const approveExamRegistration = async (regId: string, examId: string, accessCode?: string) => {
+    await db.runTransaction(async (transaction) => {
+        const regRef = db.collection('exam_registrations').doc(regId);
+        const examRef = db.collection('exams').doc(examId);
+        const regDoc = await transaction.get(regRef);
+        if (!regDoc.exists) throw new Error("Registration not found");
+        const currentData = regDoc.data() as ExamRegistration;
+        const currentStatus = currentData.paymentStatus;
+        const updatePayload: any = { paymentStatus: 'Confirmado' };
+        if (accessCode) {
+            updatePayload.accessCode = accessCode;
+        }
+        transaction.update(regRef, updatePayload);
+        if (currentStatus !== 'Confirmado') {
+            transaction.update(examRef, {
+                pendingCount: firebase.firestore.FieldValue.increment(-1),
+                paidCount: firebase.firestore.FieldValue.increment(1)
+            });
+        }
+    });
+    return true;
+};
+export const revokeExamRegistration = async (regId: string, examId: string) => {
+    let oldAccessCode: string | undefined;
+    await db.runTransaction(async (transaction) => {
+        const regRef = db.collection('exam_registrations').doc(regId);
+        const examRef = db.collection('exams').doc(examId);
+        const regDoc = await transaction.get(regRef);
+        if (!regDoc.exists) throw new Error("Registration not found");
+        const currentData = regDoc.data() as ExamRegistration;
+        const currentStatus = currentData.paymentStatus;
+        oldAccessCode = currentData.accessCode;
+        transaction.update(regRef, {
+            paymentStatus: 'Pendiente',
+            accessCode: firebase.firestore.FieldValue.delete()
+        });
+        if (currentStatus === 'Confirmado') {
+            transaction.update(examRef, {
+                pendingCount: firebase.firestore.FieldValue.increment(1),
+                paidCount: firebase.firestore.FieldValue.increment(-1)
+            });
+        }
+    });
+    if (oldAccessCode) {
+        try {
+            const ticketRef = db.collection('mock_test_tickets').doc(oldAccessCode);
+            const ticketDoc = await ticketRef.get();
+            if (ticketDoc.exists && ticketDoc.data()?.status === 'Unused') {
+                await ticketRef.delete();
+            }
+        } catch (e) {
+            console.warn("Failed to cleanup revoked ticket:", e);
+        }
+    }
+    return true;
+};
 export const deleteExamRegistration = async (regId: string, examId: string) => { 
     await db.runTransaction(async (transaction) => { 
         const regRef = db.collection('exam_registrations').doc(regId); 

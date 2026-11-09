@@ -109,6 +109,39 @@ async function startServer() {
     }
   });
 
+  // Image Proxy for html2canvas CORS bypass (Firebase Storage logos)
+  app.get("/api/proxy-image", async (req: Request, res: Response) => {
+    try {
+      const targetUrl = req.query.url as string;
+      if (!targetUrl || typeof targetUrl !== "string") {
+        res.status(400).json({ error: "Missing url parameter" });
+        return;
+      }
+      const parsed = new URL(targetUrl);
+      const allowedHosts = [
+        "firebasestorage.googleapis.com",
+        "storage.googleapis.com",
+        "gteamgr-506ff.firebasestorage.app"
+      ];
+      if (!allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith(`.${h}`))) {
+        res.status(403).json({ error: "Host not allowed" });
+        return;
+      }
+      const imgRes = await fetch(targetUrl);
+      if (!imgRes.ok) {
+        res.status(imgRes.status).json({ error: "Failed to fetch image" });
+        return;
+      }
+      const contentType = imgRes.headers.get("content-type") || "image/png";
+      const arrayBuffer = await imgRes.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      res.status(200).json({ dataUrl: `data:${contentType};base64,${base64}` });
+    } catch (err: any) {
+      console.error("/api/proxy-image error:", err);
+      res.status(500).json({ error: err.message || "Proxy error" });
+    }
+  });
+
   // Health check
   app.get("/health", (req: Request, res: Response) => res.send("OK"));
 

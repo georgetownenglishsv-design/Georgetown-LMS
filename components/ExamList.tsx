@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Icon } from './Icon';
 import { Logo } from './Logo';
-import { getExams, getExamRegistrations, addExam, updateExam, deleteExam, db, updateExamRegistration, deleteExamRegistration, toggleExamPaymentStatus, verifyDataIntegrity, firebase, createIndividualMockTicket } from '../services/db'; 
+import { getExams, getExamRegistrations, addExam, updateExam, deleteExam, db, updateExamRegistration, deleteExamRegistration, toggleExamPaymentStatus, approveExamRegistration, revokeExamRegistration, verifyDataIntegrity, firebase, createIndividualMockTicket } from '../services/db'; 
 import { getMockTests } from '../services/mockTest';
 import { Exam, ExamRegistration, MockTest } from '../types';
 // @ts-ignore
@@ -11,8 +11,15 @@ interface ExamListProps {
     onViewRegistration: (regId: string) => void;
 }
 
-const isRegistrationFinished = (reg: ExamRegistration) => {
+const isRegistrationFinished = (reg: ExamRegistration, exam?: Exam) => {
+    if (reg.paymentStatus === 'Pendiente') return false;
     if (!reg.selectedDate || !reg.selectedTime) return false;
+    const isMock = exam && (exam.type === 'OnlineMock' || exam.name.toLowerCase().includes('mock') || exam.name.toLowerCase().includes('simulacro'));
+    if (isMock) {
+        const examDate = new Date(`${reg.selectedDate}T23:59:59`);
+        examDate.setDate(examDate.getDate() + 7);
+        return new Date() > examDate;
+    }
     const dateTimeStr = `${reg.selectedDate}T${reg.selectedTime}`;
     const examDate = new Date(dateTimeStr);
     examDate.setHours(examDate.getHours() + 3);
@@ -56,6 +63,7 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
   const [accessCode, setAccessCode] = useState('');
   const [availableTests, setAvailableTests] = useState<MockTest[]>([]);
   const [selectedTestId, setSelectedTestId] = useState<string>('');
+  const [isApproving, setIsApproving] = useState(false);
   const ticketRef = useRef<HTMLDivElement>(null);
 
   // CRUD State for REGISTRATIONS
@@ -132,11 +140,11 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
       const isPending = reg.paymentStatus === 'Pendiente';
       
       if (!isPending) {
-          // Revoke Logic (Simple)
+          // Revoke Logic (Atomic)
           if(!confirm(`¿Revocar pago de ${reg.studentName || 'Estudiante'}?\nVolverá a estado pendiente.`)) return;
           try {
-              await toggleExamPaymentStatus(reg.id, reg.examId);
-              setRegistrations(prev => prev.map(r => r.id === reg.id ? { ...r, paymentStatus: 'Pendiente' } : r));
+              await revokeExamRegistration(reg.id, reg.examId);
+              setRegistrations(prev => prev.map(r => r.id === reg.id ? { ...r, paymentStatus: 'Pendiente', accessCode: undefined } : r));
               fetchExams(); 
               alert("Pago revocado.");
           } catch (e) {
@@ -157,7 +165,7 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
       const isMock = exam.type === 'OnlineMock' || exam.name.toLowerCase().includes('mock') || exam.name.toLowerCase().includes('simulacro');
       
       if (isMock) {
-          setAccessCode(`GT-MOCK-${Math.random().toString(36).substr(2, 6).toUpperCase()}`);
+          setAccessCode(reg.accessCode || `GT-MOCK-${Math.random().toString(36).substr(2, 6).toUpperCase()}`);
           // Fetch available tests for selection
           getMockTests().then(tests => {
               const active = tests.filter(t => t.status === 'Active');
@@ -173,16 +181,15 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
   };
 
   const confirmApproval = async () => {
-      if (!approvingReg || !approvingExam) return;
+      if (!approvingReg || !approvingExam || isApproving) return;
 
+      setIsApproving(true);
       try {
-          // 1. Update DB
-          await toggleExamPaymentStatus(approvingReg.id, approvingReg.examId);
+          // 1. Atomic Update in DB (Never toggles back to Pendiente)
+          await approveExamRegistration(approvingReg.id, approvingReg.examId, accessCode || undefined);
           
-          // If Online Mock (or access code exists), save access code AND create ticket
+          // If Online Mock (or access code exists), create ticket
           if (accessCode) {
-              await updateExamRegistration(approvingReg.id, { accessCode });
-              // Pass selectedTestId to createIndividualMockTicket
               await createIndividualMockTicket(accessCode, approvingReg.studentName || 'Estudiante', approvingReg.phone, selectedTestId);
           }
 
@@ -192,37 +199,34 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
 
           // 3. Generate Ticket & Message
           if (ticketRef.current) {
-              // Wait for render
-              await new Promise(r => setTimeout(r, 100));
+              await new Promise(r => setTimeout(r, 150));
               
-              const canvas = await html2canvas(ticketRef.current, { scale: 2, backgroundColor: null, useCORS: true });
-              canvas.toBlob(async (blob: Blob | null) => {
-                  if (blob) {
-                      try {
-                          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                          
-                          // Prepare Message
-                          let message = '';
-                          const studentFirstName = (approvingReg.studentName || 'Estudiante').split(' ')[0];
-                          // Check if it's a mock test based on access code presence
-                          if (accessCode) {
-                              message = `🎓 *GEORGETOWN ACADEMY*\n*Official Mock Test Registration*\n\nHola ${studentFirstName}! 👋\nTu inscripción al examen *${approvingExam.name || ''}* está confirmada.\n\n🎫 *TU CÓDIGO DE ACCESO:*\n*${accessCode}*\n\n👇 *INSTRUCCIONES:*\n1. Ingresa al portal: https://www.georgetownenglish.com/toeicmocktest\n2. Escribe tu código de acceso.\n3. Presiona [Start Exam].\n\n⚠️ *Importante:*\n- El examen dura 2 horas.\n- Usa PC/Laptop con Chrome.\n- Asegúrate de tener buena conexión.\n\n¡Mucho éxito! 🍀`;
-                          } else {
-                              message = `🎓 *GEORGETOWN ACADEMY*\n*Confirmación de Examen*\n\nHola ${studentFirstName}! 👋\nTu cupo para el examen *${approvingExam.name || ''}* ha sido confirmado.\n\n📅 Fecha: ${approvingReg.selectedDate || 'Por definir'}\n⏰ Hora: ${approvingReg.selectedTime || 'Por definir'}\n📍 Lugar: Georgetown Academy (Presencial)\n\nPor favor llega 15 minutos antes. ¡Éxito! 🍀`;
-                          }
-
-                          alert("✅ Ticket copiado al portapapeles.\n\nSe abrirá WhatsApp. Presiona 'Pegar' (Ctrl+V) para enviar la imagen.");
-                          
-                          const phone = (approvingReg.phone || '').replace(/[^0-9]/g, '');
-                          const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
-                          window.open(url, '_blank');
-
-                      } catch (err) {
-                          console.error("Clipboard error", err);
-                          alert("Aprobado, pero error al copiar ticket. Revise permisos.");
+              const canvas = await html2canvas(ticketRef.current, { scale: 2, backgroundColor: null, useCORS: true, allowTaint: false });
+              const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
+              if (blob) {
+                  try {
+                      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+                      
+                      // Prepare Message
+                      let message = '';
+                      const studentFirstName = (approvingReg.studentName || 'Estudiante').split(' ')[0];
+                      if (accessCode) {
+                          message = `🎓 *GEORGETOWN ACADEMY*\n*Official Mock Test Registration*\n\nHola ${studentFirstName}! 👋\nTu inscripción al examen *${approvingExam.name || ''}* está confirmada.\n\n🎫 *TU CÓDIGO DE ACCESO:*\n*${accessCode}*\n\n👇 *INSTRUCCIONES:*\n1. Ingresa al portal: https://www.georgetownenglish.com/toeicmocktest\n2. Escribe tu código de acceso.\n3. Presiona [Start Exam].\n\n⚠️ *Importante:*\n- El examen dura 2 horas.\n- Usa PC/Laptop con Chrome.\n- Asegúrate de tener buena conexión.\n\n¡Mucho éxito! 🍀`;
+                      } else {
+                          message = `🎓 *GEORGETOWN ACADEMY*\n*Confirmación de Examen*\n\nHola ${studentFirstName}! 👋\nTu cupo para el examen *${approvingExam.name || ''}* ha sido confirmado.\n\n📅 Fecha: ${approvingReg.selectedDate || 'Por definir'}\n⏰ Hora: ${approvingReg.selectedTime || 'Por definir'}\n📍 Lugar: Georgetown Academy (Presencial)\n\nPor favor llega 15 minutos antes. ¡Éxito! 🍀`;
                       }
+
+                      alert("✅ Ticket copiado al portapapeles.\n\nSe abrirá WhatsApp. Presiona 'Pegar' (Ctrl+V) para enviar la imagen.");
+                      
+                      const phone = (approvingReg.phone || '').replace(/[^0-9]/g, '');
+                      const url = `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
+                      window.open(url, '_blank');
+
+                  } catch (err) {
+                      console.error("Clipboard error", err);
+                      alert("Aprobado, pero error al copiar ticket. Revise permisos.");
                   }
-              });
+              }
           }
 
           setApprovalModalOpen(false);
@@ -232,6 +236,8 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
       } catch (e) {
           console.error(e);
           alert("Error al aprobar.");
+      } finally {
+          setIsApproving(false);
       }
   };
 
@@ -377,9 +383,10 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
   };
 
   const filteredRegistrations = useMemo(() => {
+      const currentExam = exams.find(e => e.id === selectedExamId);
       let filtered = registrations;
       if (!showPastRegs) {
-          filtered = filtered.filter(r => !isRegistrationFinished(r));
+          filtered = filtered.filter(r => !isRegistrationFinished(r, currentExam));
       }
       if (regSearchTerm) {
           const lower = regSearchTerm.toLowerCase();
@@ -390,7 +397,7 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
           if (a.paymentStatus !== 'Pendiente' && b.paymentStatus === 'Pendiente') return 1;
           return new Date(b.registrationDate).getTime() - new Date(a.registrationDate).getTime();
       });
-  }, [registrations, showPastRegs, regSearchTerm]);
+  }, [registrations, showPastRegs, regSearchTerm, exams, selectedExamId]);
 
   const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
 
@@ -846,16 +853,16 @@ const ExamList: React.FC<ExamListProps> = ({ onViewRegistration }) => {
 
                   {/* Footer Actions */}
                   <div className="px-8 py-6 bg-slate-50 dark:bg-[#1e293b] border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
-                      <button onClick={() => setApprovalModalOpen(false)} className="px-5 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors">
+                      <button onClick={() => !isApproving && setApprovalModalOpen(false)} disabled={isApproving} className="px-5 py-2.5 text-sm font-bold text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors disabled:opacity-50">
                           Cancelar
                       </button>
                       <button 
                           onClick={confirmApproval}
-                          disabled={!!((approvingExam.type === 'OnlineMock' || accessCode) && (!accessCode || !selectedTestId))}
+                          disabled={isApproving || !!((approvingExam.type === 'OnlineMock' || accessCode) && (!accessCode || !selectedTestId))}
                           className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                          <Icon name="check_circle" />
-                          Confirmar y Enviar WhatsApp
+                          <Icon name={isApproving ? "sync" : "check_circle"} className={isApproving ? "animate-spin" : ""} />
+                          {isApproving ? 'Procesando...' : 'Confirmar y Enviar WhatsApp'}
                       </button>
                   </div>
               </div>
